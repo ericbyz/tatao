@@ -1,0 +1,11 @@
+web/node_modules/
+web/dist/
+server/ai-test-tool.exe
+server/ai-test-tool
+server/data/
+.env
+*.log
+server/*.json
+
+*.tsbuildinfo
+
