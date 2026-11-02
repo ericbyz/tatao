@@ -193,19 +193,17 @@ func composeProjectContext(project domain.Project, entries []domain.KnowledgeEnt
 func (h *Handler) exploreKnowledge(w http.ResponseWriter, r *http.Request) {
 	http.NewResponseController(w).SetWriteDeadline(time.Now().Add(10 * time.Minute))
 	var input struct {
-		AgentID      string `json:"agentId"`
-		WorkspaceDir string `json:"workspaceDir"`
+		AgentID       string `json:"agentId"`
+		EnvironmentID string `json:"environmentId"`
+		WorkspaceDir  string `json:"workspaceDir"`
 	}
 	if err := decodeJSON(r, &input); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if strings.TrimSpace(input.WorkspaceDir) == "" {
+	input.WorkspaceDir = strings.TrimSpace(input.WorkspaceDir)
+	if input.WorkspaceDir == "" {
 		writeError(w, http.StatusBadRequest, "请填写被测项目工作目录")
-		return
-	}
-	if info, err := os.Stat(strings.TrimSpace(input.WorkspaceDir)); err != nil || !info.IsDir() {
-		writeError(w, http.StatusBadRequest, "工作目录不存在或不是目录")
 		return
 	}
 	projectID := r.PathValue("id")
@@ -214,13 +212,40 @@ func (h *Handler) exploreKnowledge(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "项目不存在")
 		return
 	}
+	// 远程环境：目录存在性在 SSH 会话内验证，跳过本机 stat；环境备注与探索提示词注入提示词
+	environmentNotes, environmentExplorePrompt := "", ""
+	var environmentTarget *agent.EnvironmentTarget
+	usingRemote := strings.TrimSpace(input.EnvironmentID) != ""
+	if usingRemote {
+		environment, ok := h.store.Environment(strings.TrimSpace(input.EnvironmentID))
+		if !ok {
+			writeError(w, http.StatusNotFound, "测试环境不存在")
+			return
+		}
+		environmentNotes = strings.TrimSpace(environment.Notes)
+		environmentExplorePrompt = strings.TrimSpace(environment.ExplorePrompt)
+		environmentPassword, _ := h.store.Secret(environment.ID)
+		environmentTarget = &agent.EnvironmentTarget{
+			Kind:     "linux",
+			Host:     environment.Host,
+			Port:     environment.Port,
+			Username: environment.Username,
+			Password: environmentPassword,
+		}
+		if environmentNotes != "" {
+			input.WorkspaceDir += "\n\n【环境访问说明】" + environmentNotes
+		}
+		if environmentExplorePrompt != "" {
+			input.WorkspaceDir += "\n\n【环境探索要求】" + environmentExplorePrompt
+		}
+	}
 	savedAgent, ok := h.store.Agent(input.AgentID)
 	if !ok {
 		writeError(w, http.StatusNotFound, "智能体不存在")
 		return
 	}
 	secret, _ := h.store.Secret(store.SecretAgentPrefix + savedAgent.ID)
-	cfg := agent.Config{Name: savedAgent.Name, Type: savedAgent.Type, BaseURL: savedAgent.BaseURL, Model: savedAgent.Model, Command: savedAgent.Command, ExtraArgs: savedAgent.ExtraArgs, APIKey: secret}
+	cfg := agent.Config{Name: savedAgent.Name, Type: savedAgent.Type, BaseURL: savedAgent.BaseURL, Model: savedAgent.Model, Command: savedAgent.Command, ExtraArgs: savedAgent.ExtraArgs, APIKey: secret, Environment: environmentTarget}
 	entries, err := executor.ExploreProject(r.Context(), cfg, strings.TrimSpace(input.WorkspaceDir), project.Context)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())

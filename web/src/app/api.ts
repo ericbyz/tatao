@@ -165,7 +165,7 @@ export function deleteKnowledge(id: string) {
   return request<{ deleted: boolean }>('/api/knowledge/' + encodeURIComponent(id), { method: 'DELETE' })
 }
 
-export function exploreKnowledge(projectId: string, input: { agentId: string; workspaceDir: string }) {
+export function exploreKnowledge(projectId: string, input: { agentId: string; workspaceDir: string; environmentId?: string }) {
   return request<{ count: number; entries: KnowledgeEntry[] }>('/api/projects/' + encodeURIComponent(projectId) + '/knowledge/explore', {
     method: 'POST',
     body: JSON.stringify(input),

@@ -205,7 +205,7 @@ export default function App() {
     if (loadError) return <div className="error-view"><strong>无法连接后端</strong><p>{loadError}</p><button className="button" type="button" onClick={() => refresh()}>重试</button></div>
     switch (page) {
       case 'home': return <HomeView projects={projectsWithEnvironmentCounts} />
-      case 'projects': return <ProjectsView projects={projectsWithEnvironmentCounts} agents={agents} selectedId={selectedProjectId} onSelect={handleSelectProject} onCreate={handleCreateProject} onSync={handleSync} notify={notify} />
+      case 'projects': return <ProjectsView projects={projectsWithEnvironmentCounts} environments={environments} agents={agents} selectedId={selectedProjectId} onSelect={handleSelectProject} onCreate={handleCreateProject} onSync={handleSync} notify={notify} />
       case 'environments': return <EnvironmentsView projects={projectsWithEnvironmentCounts} environments={environments} onCreate={handleCreateEnvironment} onAssign={handleAssignEnvironment} />
       case 'cases': return <TestCasesView projects={projectsWithEnvironmentCounts} environments={environments} testCases={testCases} externalItems={externalItems} agents={agents} projectId={selectedProjectId} onProjectChange={handleSelectProject} onSync={handleSync} onGenerate={handleGenerate} onCasesChanged={refresh} onRunStarted={handleRunStarted} notify={notify} />
       case 'runs': return <RunsView environments={environments} projects={projectsWithEnvironmentCounts} agents={agents} testCases={testCases} onCasesChanged={refresh} notify={notify} />

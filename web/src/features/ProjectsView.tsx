@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { deleteKnowledge, exploreKnowledge, listKnowledge, listTAPDWorkspaces, saveKnowledge, updateProject } from '../app/api'
-import type { AgentConfig, KnowledgeEntry } from '../app/types'
+import type { AgentConfig, Environment, KnowledgeEntry } from '../app/types'
 import type { Project, TAPDWorkspace } from '../app/types'
 import { Icon } from '../components/Icon'
 import { Modal } from '../components/Modal'
@@ -8,6 +8,7 @@ import { StatusTag } from '../components/StatusTag'
 
 type ProjectsViewProps = {
   projects: Project[]
+  environments: Environment[]
   agents: AgentConfig[]
   selectedId: string
   onSelect: (id: string) => void
@@ -26,7 +27,7 @@ function formatDate(value: string) {
   }).format(new Date(value))
 }
 
-export function ProjectsView({ projects, agents, selectedId, onSelect, onCreate, onSync, notify }: ProjectsViewProps) {
+export function ProjectsView({ projects, environments, agents, selectedId, onSelect, onCreate, onSync, notify }: ProjectsViewProps) {
   const [query, setQuery] = useState('')
   const [dialogOpen, setDialogOpen] = useState(false)
   const selectedProject = projects.find((project) => project.id === selectedId) ?? projects[0]
@@ -109,7 +110,7 @@ export function ProjectsView({ projects, agents, selectedId, onSelect, onCreate,
           </div>
           <ContextSection project={selectedProject} notify={notify} />
 
-          <KnowledgeSection projectId={selectedProject.id} agents={agents} notify={notify} />
+          <KnowledgeSection projectId={selectedProject.id} environments={environments} agents={agents} notify={notify} />
 
           <section className="detail-section">
             <h3>项目信息</h3>
@@ -310,7 +311,7 @@ function ContextSection({ project, notify }: { project: Project; notify: (messag
 const knowledgeCategories = ['功能导航', '数据与文件约定', '接口与服务', '账号与凭据', '术语解释', '禁忌与风险']
 
 // KnowledgeSection 维护项目知识库：设计/执行用例时这些条目会注入智能体提示词。
-function KnowledgeSection({ projectId, agents, notify }: { projectId: string; agents: AgentConfig[]; notify: (message: string, tone?: 'success' | 'error') => void }) {
+function KnowledgeSection({ projectId, environments, agents, notify }: { projectId: string; environments: Environment[]; agents: AgentConfig[]; notify: (message: string, tone?: 'success' | 'error') => void }) {
   const [entries, setEntries] = useState<KnowledgeEntry[]>([])
   const [editing, setEditing] = useState<KnowledgeEntry | 'new' | null>(null)
   const [expanded, setExpanded] = useState<string | null>(null)
@@ -343,6 +344,7 @@ function KnowledgeSection({ projectId, agents, notify }: { projectId: string; ag
       {exploring === 'config' ? (
         <ExploreKnowledgeDialog
           projectId={projectId}
+          environments={environments}
           agents={agents}
           onClose={() => setExploring(false)}
           onExplored={(created) => {
@@ -437,22 +439,30 @@ function KnowledgeEditDialog({ projectId, entry, onClose, onSaved, notify }: {
 }
 
 // ExploreKnowledgeDialog 配置并启动 AI 探索：智能体只读浏览项目目录并产出知识条目。
-function ExploreKnowledgeDialog({ projectId, agents, onClose, onExplored, notify }: {
+function ExploreKnowledgeDialog({ projectId, environments, agents, onClose, onExplored, notify }: {
   projectId: string
+  environments: Environment[]
   agents: AgentConfig[]
   onClose: () => void
   onExplored: (created: KnowledgeEntry[]) => void
   notify: (message: string, tone?: 'success' | 'error') => void
 }) {
   const [agentId, setAgentId] = useState(agents.find((agent) => agent.isDefault)?.id ?? agents[0]?.id ?? '')
+  const [environmentId, setEnvironmentId] = useState('')
   const [workspaceDir, setWorkspaceDir] = useState('')
+  const [explorePrompt, setExplorePrompt] = useState('')
   const [exploring, setExploring] = useState(false)
+  const selectedEnvironment = environments.find((environment) => environment.id === environmentId)
 
   const submit = async () => {
     if (!agentId || !workspaceDir.trim()) return
     setExploring(true)
     try {
-      const result = await exploreKnowledge(projectId, { agentId, workspaceDir: workspaceDir.trim() })
+      const result = await exploreKnowledge(projectId, {
+        agentId,
+        workspaceDir: workspaceDir.trim(),
+        environmentId: environmentId || undefined,
+      })
       onExplored(result.entries ?? [])
     } catch (error) {
       notify(error instanceof Error ? error.message : 'AI 探索失败', 'error')
@@ -464,12 +474,28 @@ function ExploreKnowledgeDialog({ projectId, agents, onClose, onExplored, notify
     <Modal title="AI 探索项目" description="智能体将以只读方式浏览被测项目目录（源码结构、启动/测试命令、配置、接口、风险），把发现整理为知识条目。" onClose={onClose} width="wide">
       <div className="form-stack">
         <div className="form-grid">
+          <label className="field"><span>测试环境</span>
+            <select value={environmentId} onChange={(event) => {
+              setEnvironmentId(event.target.value)
+              const env = environments.find((item) => item.id === event.target.value)
+              setExplorePrompt(env?.explorePrompt ?? '')
+            }}>
+              <option value="">本机（服务所在机器）</option>
+              {environments.map((environment) => <option key={environment.id} value={environment.id}>{environment.name}（{environment.host}）</option>)}
+            </select>
+          </label>
           <label className="field"><span>智能体</span>
             <select value={agentId} onChange={(event) => setAgentId(event.target.value)}>
               {agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}（{agent.type}）</option>)}
             </select>
           </label>
-          <label className="field field--full"><span>被测项目目录（本机路径）</span><input value={workspaceDir} onChange={(event) => setWorkspaceDir(event.target.value)} placeholder="例如 D:\repos\usb-copy-web" required /></label>
+          <label className="field field--full"><span>{environmentId ? '被测项目目录（在环境上的路径）' : '被测项目目录（本机路径）'}</span><input value={workspaceDir} onChange={(event) => setWorkspaceDir(event.target.value)} placeholder={environmentId ? '例如 /opt/usb-copy' : '例如 D:/repos/usb-copy-web'} required /></label>
+          {environmentId ? (
+            <label className="field field--full"><span>探索提示词（重点探索方向，可编辑）</span>
+              <textarea value={explorePrompt} onChange={(event) => setExplorePrompt(event.target.value)} rows={4} placeholder="例如：重点探索 /opt/usb-copy/config 下的服务配置；跳过 logs 目录；管理端在 /admin…" />
+              <small>选择测试环境后可在此给智能体下达探索重点，内容会注入探索提示词。</small>
+            </label>
+          ) : null}
           <small className="field field--full muted-text">探索是只读的：智能体只浏览文件与内容，不会修改项目。通常需要 1-3 分钟。</small>
         </div>
       </div>

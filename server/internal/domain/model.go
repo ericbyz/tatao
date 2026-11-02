@@ -23,17 +23,18 @@ type Project struct {
 }
 
 type Environment struct {
-	ID         string   `json:"id"`
-	ProjectIDs []string `json:"projectIds"`
-	Name       string   `json:"name"`
-	OS         string   `json:"os"`
-	Host       string   `json:"host"`
-	Port       int      `json:"port"`
-	Username   string   `json:"username"`
-	AuthType   string   `json:"authType"`
-	Notes      string   `json:"notes,omitempty"` // 访问方式/服务地址/注意事项
-	SecretSet  bool     `json:"secretSet"`
-	Status     string   `json:"status"`
+	ID            string   `json:"id"`
+	ProjectIDs    []string `json:"projectIds"`
+	Name          string   `json:"name"`
+	OS            string   `json:"os"`
+	Host          string   `json:"host"`
+	Port          int      `json:"port"`
+	Username      string   `json:"username"`
+	AuthType      string   `json:"authType"`
+	Notes         string   `json:"notes,omitempty"`         // 访问方式/服务地址/注意事项
+	ExplorePrompt string   `json:"explorePrompt,omitempty"` // AI 探索该环境时的定制提示词
+	SecretSet     bool     `json:"secretSet"`
+	Status        string   `json:"status"`
 }
 
 type TestCase struct {

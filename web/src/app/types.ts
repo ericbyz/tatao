@@ -23,6 +23,7 @@ export type Environment = {
   username: string
   authType: 'password' | 'ssh_key'
   notes?: string
+  explorePrompt?: string
   secretSet: boolean
   status: 'online' | 'unchecked' | 'offline'
 }
