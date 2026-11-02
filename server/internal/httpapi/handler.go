@@ -24,6 +24,7 @@ type Store interface {
 	AddProject(domain.Project) domain.Project
 	Environments() []domain.Environment
 	Environment(id string) (domain.Environment, bool)
+	EnvironmentKnowledge(environmentID string) []domain.KnowledgeEntry
 	AddEnvironment(domain.Environment, string) (domain.Environment, error)
 	AssignEnvironment(string, []string) (domain.Environment, error)
 	TestCases() []domain.TestCase
@@ -76,6 +77,8 @@ func New(store Store, gateway TAPDGateway) http.Handler {
 	mux.HandleFunc("POST /api/projects/{id}/knowledge/explore", handler.exploreKnowledge)
 	mux.HandleFunc("PUT /api/knowledge/{id}", handler.updateKnowledge)
 	mux.HandleFunc("DELETE /api/knowledge/{id}", handler.deleteKnowledge)
+	mux.HandleFunc("GET /api/environments/{id}/knowledge", handler.listEnvironmentKnowledge)
+	mux.HandleFunc("POST /api/environments/{id}/knowledge/explore", handler.exploreEnvironmentKnowledge)
 	mux.HandleFunc("GET /api/environments", handler.listEnvironments)
 	mux.HandleFunc("POST /api/environments", handler.createEnvironment)
 	mux.HandleFunc("PATCH /api/environments/{id}/projects", handler.assignEnvironment)
@@ -910,6 +913,71 @@ func withMiddleware(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// listEnvironmentKnowledge 返回环境的知识条目。
+func (h *Handler) listEnvironmentKnowledge(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, h.store.EnvironmentKnowledge(r.PathValue("id")))
+}
+
+// exploreEnvironmentKnowledge 一键 AI 探索：智能体经 SSH 只读探索环境，
+// 把发现的服务、端口、配置、风险沉淀为环境知识条目。
+func (h *Handler) exploreEnvironmentKnowledge(w http.ResponseWriter, r *http.Request) {
+	http.NewResponseController(w).SetWriteDeadline(time.Now().Add(10 * time.Minute))
+	environment, ok := h.store.Environment(r.PathValue("id"))
+	if !ok {
+		writeError(w, http.StatusNotFound, "测试环境不存在")
+		return
+	}
+	var input struct {
+		AgentID string `json:"agentId"`
+	}
+	if err := decodeJSON(r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	agentID := strings.TrimSpace(input.AgentID)
+	if agentID == "" {
+		for _, agent := range h.store.Agents() {
+			if agent.IsDefault {
+				agentID = agent.ID
+				break
+			}
+		}
+		if agentID == "" && len(h.store.Agents()) > 0 {
+			agentID = h.store.Agents()[0].ID
+		}
+	}
+	if agentID == "" {
+		writeError(w, http.StatusBadRequest, "没有可用的智能体，请先在连接设置中添加")
+		return
+	}
+	savedAgent, ok := h.store.Agent(agentID)
+	if !ok {
+		writeError(w, http.StatusNotFound, "智能体不存在")
+		return
+	}
+	secret, _ := h.store.Secret(store.SecretAgentPrefix + savedAgent.ID)
+	password, _ := h.store.Secret(environment.ID)
+	cfg := agent.Config{Name: savedAgent.Name, Type: savedAgent.Type, BaseURL: savedAgent.BaseURL, Model: savedAgent.Model, Command: savedAgent.Command, ExtraArgs: savedAgent.ExtraArgs, APIKey: secret}
+	entries, err := executor.ExploreEnvironment(r.Context(), cfg, agent.EnvironmentTarget{
+		Kind:     "linux",
+		Host:     environment.Host,
+		Port:     environment.Port,
+		Username: environment.Username,
+		Password: password,
+	}, environment.Notes, environment.ExplorePrompt)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	saved := make([]domain.KnowledgeEntry, 0, len(entries))
+	for _, entry := range entries {
+		entry.EnvironmentID = environment.ID
+		entry.GeneratedBy = savedAgent.Name
+		saved = append(saved, h.store.PutKnowledge(entry))
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"count": len(saved), "entries": saved})
 }
 
 func (h *Handler) listRuns(w http.ResponseWriter, r *http.Request) {

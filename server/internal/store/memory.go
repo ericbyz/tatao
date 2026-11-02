@@ -638,3 +638,16 @@ func (m *Memory) DeleteKnowledge(id string) bool {
 	m.persist()
 	return true
 }
+
+// EnvironmentKnowledge 返回一个环境的全部知识条目。
+func (m *Memory) EnvironmentKnowledge(environmentID string) []domain.KnowledgeEntry {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	entries := make([]domain.KnowledgeEntry, 0)
+	for _, entry := range m.knowledge {
+		if entry.EnvironmentID == environmentID {
+			entries = append(entries, entry)
+		}
+	}
+	return entries
+}

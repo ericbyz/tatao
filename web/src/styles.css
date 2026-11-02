@@ -461,3 +461,6 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .context-text { margin: 0 0 8px; color: #33475f; font-size: 12.5px; line-height: 1.7; white-space: pre-wrap; }
 .context-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .context-editor { width: 100%; padding: 9px 11px; border: 1px solid var(--line); border-radius: 5px; font-size: 12.5px; line-height: 1.6; font-family: inherit; }
+
+.kb-source { flex: 0 0 auto; padding: 2px 7px; border-radius: 4px; font-size: 10.5px; font-weight: 620; color: var(--muted); background: #eef1f5; }
+.kb-source--ai { color: #6a3fb5; background: #f0eafa; }

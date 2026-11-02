@@ -149,6 +149,7 @@ export type KnowledgeCategory = '功能导航' | '数据与文件约定' | '接�
 export type KnowledgeEntry = {
   id: string
   projectId: string
+  environmentId?: string
   category: string
   title: string
   content: string

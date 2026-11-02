@@ -171,3 +171,14 @@ export function exploreKnowledge(projectId: string, input: { agentId: string; wo
     body: JSON.stringify(input),
   })
 }
+
+export function listEnvironmentKnowledge(environmentId: string) {
+  return request<KnowledgeEntry[]>('/api/environments/' + encodeURIComponent(environmentId) + '/knowledge')
+}
+
+export function exploreEnvironmentKnowledge(environmentId: string, agentId?: string) {
+  return request<{ count: number; entries: KnowledgeEntry[] }>('/api/environments/' + encodeURIComponent(environmentId) + '/knowledge/explore', {
+    method: 'POST',
+    body: JSON.stringify(agentId ? { agentId } : {}),
+  })
+}
