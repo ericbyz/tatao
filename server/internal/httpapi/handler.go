@@ -38,6 +38,9 @@ type Store interface {
 	UpdateProject(id, name, context string) (domain.Project, bool)
 	PutAgent(agent domain.AgentConfig, secret string) domain.AgentConfig
 	DeleteAgent(id string) bool
+	Knowledge(projectID string) []domain.KnowledgeEntry
+	PutKnowledge(entry domain.KnowledgeEntry) domain.KnowledgeEntry
+	DeleteKnowledge(id string) bool
 	CreateRun(run domain.TestRun) domain.TestRun
 	SaveRun(run domain.TestRun)
 	Run(id string) (domain.TestRun, bool)
@@ -68,6 +71,10 @@ func New(store Store, gateway TAPDGateway) http.Handler {
 	mux.HandleFunc("GET /api/projects", handler.listProjects)
 	mux.HandleFunc("POST /api/projects", handler.createProject)
 	mux.HandleFunc("PATCH /api/projects/{id}", handler.updateProject)
+	mux.HandleFunc("GET /api/projects/{id}/knowledge", handler.listKnowledge)
+	mux.HandleFunc("POST /api/projects/{id}/knowledge", handler.saveKnowledgeForProject)
+	mux.HandleFunc("PUT /api/knowledge/{id}", handler.updateKnowledge)
+	mux.HandleFunc("DELETE /api/knowledge/{id}", handler.deleteKnowledge)
 	mux.HandleFunc("GET /api/environments", handler.listEnvironments)
 	mux.HandleFunc("POST /api/environments", handler.createEnvironment)
 	mux.HandleFunc("PATCH /api/environments/{id}/projects", handler.assignEnvironment)
@@ -139,6 +146,105 @@ func (h *Handler) updateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, project)
+}
+
+// composeProjectContext 组装被测项目背景 + 知识库条目，注入设计与执行提示词。
+func composeProjectContext(project domain.Project, entries []domain.KnowledgeEntry) string {
+	var builder strings.Builder
+	if strings.TrimSpace(project.Context) != "" {
+		builder.WriteString(strings.TrimSpace(project.Context))
+		builder.WriteString("\n")
+	}
+	relevant := make([]domain.KnowledgeEntry, 0, len(entries))
+	for _, entry := range entries {
+		if strings.TrimSpace(entry.Title) == "" && strings.TrimSpace(entry.Content) == "" {
+			continue
+		}
+		relevant = append(relevant, entry)
+	}
+	if len(relevant) == 0 {
+		return strings.TrimSpace(builder.String())
+	}
+	if len(relevant) > 20 {
+		relevant = relevant[:20]
+	}
+	builder.WriteString("\n【项目知识库】\n")
+	for _, entry := range relevant {
+		content := strings.TrimSpace(entry.Content)
+		if len([]rune(content)) > 500 {
+			content = string([]rune(content)[:500]) + "…"
+		}
+		category := entry.Category
+		if category == "" {
+			category = "知识"
+		}
+		builder.WriteString("- [" + category + "] " + entry.Title)
+		if content != "" {
+			builder.WriteString("：" + content)
+		}
+		builder.WriteString("\n")
+	}
+	return strings.TrimSpace(builder.String())
+}
+
+func (h *Handler) listKnowledge(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, h.store.Knowledge(r.PathValue("id")))
+}
+
+type knowledgeInput struct {
+	Category string `json:"category"`
+	Title    string `json:"title"`
+	Content  string `json:"content"`
+	ID       string `json:"id"`
+}
+
+func (h *Handler) saveKnowledgeForProject(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("id")
+	if _, ok := h.store.Project(projectID); !ok {
+		writeError(w, http.StatusNotFound, "项目不存在")
+		return
+	}
+	var input knowledgeInput
+	if err := decodeJSON(r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	entry := h.store.PutKnowledge(domain.KnowledgeEntry{
+		ProjectID: projectID,
+		Category:  input.Category,
+		Title:     input.Title,
+		Content:   input.Content,
+		ID:        input.ID,
+	})
+	writeJSON(w, http.StatusCreated, entry)
+}
+
+func (h *Handler) updateKnowledge(w http.ResponseWriter, r *http.Request) {
+	var input knowledgeInput
+	if err := decodeJSON(r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	input.ID = r.PathValue("id")
+	entry := h.store.PutKnowledge(domain.KnowledgeEntry{
+		ID:       input.ID,
+		Category: input.Category,
+		Title:    input.Title,
+		Content:  input.Content,
+	})
+	if entry.ProjectID == "" {
+		writeError(w, http.StatusNotFound, "知识条目不存在")
+		return
+	}
+	writeJSON(w, http.StatusOK, entry)
+}
+
+func (h *Handler) deleteKnowledge(w http.ResponseWriter, r *http.Request) {
+	if !h.store.DeleteKnowledge(r.PathValue("id")) {
+		writeError(w, http.StatusNotFound, "知识条目不存在")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"deleted": true})
 }
 
 func (h *Handler) listEnvironments(w http.ResponseWriter, _ *http.Request) {
@@ -578,7 +684,8 @@ func (h *Handler) generateTestCases(w http.ResponseWriter, r *http.Request) {
 		if strings.TrimSpace(input.Model) != "" {
 			cfg.Model = strings.TrimSpace(input.Model)
 		}
-		drafts, err := agent.DesignTestCases(r.Context(), cfg, items, project.Context)
+		context := composeProjectContext(project, h.store.Knowledge(project.ID))
+		drafts, err := agent.DesignTestCases(r.Context(), cfg, items, context)
 		if err != nil {
 			writeError(w, http.StatusBadGateway, "智能体生成失败："+err.Error())
 			return
@@ -838,13 +945,18 @@ func (h *Handler) createRun(w http.ResponseWriter, r *http.Request) {
 		Total:           len(cases),
 	})
 
-	go h.executeRun(run, cfg, cases, project.Context)
+	go h.executeRun(run, cfg, cases, composeProjectContext(project, h.store.Knowledge(project.ID)))
 	writeJSON(w, http.StatusCreated, run)
 }
 
 // executeRun 串行执行批次内全部用例，实时回写结果。
 func (h *Handler) executeRun(run domain.TestRun, cfg agent.Config, cases []domain.TestCase, projectContext string) {
 	ctx := context.Background()
+	if run.EnvironmentID != "" {
+		if environment, ok := h.store.Environment(run.EnvironmentID); ok && strings.TrimSpace(environment.Notes) != "" {
+			projectContext = strings.TrimSpace(projectContext) + "\n\n【目标环境访问说明】\n" + strings.TrimSpace(environment.Notes)
+		}
+	}
 	sourceItems := h.store.ExternalItems(run.ProjectID)
 	for _, testCase := range cases {
 		var source *domain.ExternalItem

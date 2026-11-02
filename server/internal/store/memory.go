@@ -40,6 +40,7 @@ type Memory struct {
 	tapdSettings  domain.TAPDSettings
 	agents        []domain.AgentConfig
 	runs          []domain.TestRun
+	knowledge     []domain.KnowledgeEntry
 	secrets       map[string][]byte
 	aead          cipher.AEAD
 	secretKey     []byte
@@ -55,6 +56,7 @@ func NewMemory() *Memory {
 		externalItems: make(map[string][]domain.ExternalItem),
 		agents:        []domain.AgentConfig{},
 		runs:          []domain.TestRun{},
+		knowledge:     []domain.KnowledgeEntry{},
 		secrets:       make(map[string][]byte),
 		aead:          aeadFromKey(key),
 		secretKey:     key,
@@ -87,6 +89,7 @@ type persistedState struct {
 	TAPDSettings  domain.TAPDSettings              `json:"tapdSettings"`
 	Agents        []domain.AgentConfig             `json:"agents"`
 	Runs          []domain.TestRun                 `json:"runs"`
+	Knowledge     []domain.KnowledgeEntry          `json:"knowledge"`
 	Secrets       map[string][]byte                `json:"secrets"`
 }
 
@@ -112,6 +115,7 @@ func (m *Memory) loadLocked() error {
 	m.tapdSettings = state.TAPDSettings
 	m.agents = state.Agents
 	m.runs = state.Runs
+	m.knowledge = state.Knowledge
 	m.secrets = state.Secrets
 	if m.agents == nil {
 		m.agents = []domain.AgentConfig{}
@@ -140,6 +144,7 @@ func (m *Memory) saveLocked() error {
 		TAPDSettings:  m.tapdSettings,
 		Agents:        m.agents,
 		Runs:          m.runs,
+		Knowledge:     m.knowledge,
 		Secrets:       m.secrets,
 	})
 	if err != nil {
@@ -578,4 +583,55 @@ func (m *Memory) Runs() []domain.TestRun {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return slices.Clone(m.runs)
+}
+
+// Knowledge 返回一个项目的全部知识条目（新在前）。
+func (m *Memory) Knowledge(projectID string) []domain.KnowledgeEntry {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	entries := make([]domain.KnowledgeEntry, 0)
+	for _, entry := range m.knowledge {
+		if entry.ProjectID == projectID {
+			entries = append(entries, entry)
+		}
+	}
+	return entries
+}
+
+// PutKnowledge 新增或更新知识条目，返回保存后的条目。
+func (m *Memory) PutKnowledge(entry domain.KnowledgeEntry) domain.KnowledgeEntry {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	entry.Title = strings.TrimSpace(entry.Title)
+	entry.Content = strings.TrimSpace(entry.Content)
+	entry.Category = strings.TrimSpace(entry.Category)
+	index := slices.IndexFunc(m.knowledge, func(existing domain.KnowledgeEntry) bool {
+		return existing.ID == entry.ID
+	})
+	if index < 0 {
+		entry.ID = newID("kn")
+		entry.CreatedAt = time.Now()
+		m.knowledge = append(m.knowledge, entry)
+	} else {
+		entry.ID = m.knowledge[index].ID
+		entry.CreatedAt = m.knowledge[index].CreatedAt
+		m.knowledge[index] = entry
+	}
+	m.persist()
+	return entry
+}
+
+// DeleteKnowledge 删除一条知识条目。
+func (m *Memory) DeleteKnowledge(id string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	index := slices.IndexFunc(m.knowledge, func(entry domain.KnowledgeEntry) bool {
+		return entry.ID == id
+	})
+	if index < 0 {
+		return false
+	}
+	m.knowledge = slices.Delete(m.knowledge, index, index+1)
+	m.persist()
+	return true
 }

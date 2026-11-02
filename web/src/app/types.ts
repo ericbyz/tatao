@@ -142,3 +142,14 @@ export type TestCaseInput = {
   steps: string[]
   expected: string
 }
+
+export type KnowledgeCategory = '功能导航' | '数据与文件约定' | '接口与服务' | '账号与凭据' | '术语解释' | '禁忌与风险'
+
+export type KnowledgeEntry = {
+  id: string
+  projectId: string
+  category: string
+  title: string
+  content: string
+  createdAt: string
+}

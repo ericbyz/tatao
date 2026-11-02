@@ -1,6 +1,7 @@
 import type {
   AgentConfig,
   AgentInput,
+  KnowledgeEntry,
   LocalAgent,
   TestCaseInput,
   TestRun,
@@ -150,4 +151,16 @@ export function fetchAgentModel(agentType: string, signal?: AbortSignal) {
 
 export function createManualTestCase(input: TestCaseInput) {
   return request<TestCase>('/api/test-cases', { method: 'POST', body: JSON.stringify(input) })
+}
+
+export function listKnowledge(projectId: string, signal?: AbortSignal) {
+  return request<KnowledgeEntry[]>('/api/projects/' + encodeURIComponent(projectId) + '/knowledge', { signal })
+}
+
+export function saveKnowledge(projectId: string, input: { id?: string; category: string; title: string; content: string }) {
+  return request<KnowledgeEntry>('/api/projects/' + encodeURIComponent(projectId) + '/knowledge', { method: 'POST', body: JSON.stringify(input) })
+}
+
+export function deleteKnowledge(id: string) {
+  return request<{ deleted: boolean }>('/api/knowledge/' + encodeURIComponent(id), { method: 'DELETE' })
 }

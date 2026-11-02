@@ -80,7 +80,9 @@ export function ExecuteRunDialog({ projects, environments, agents, testCases, de
     }
   }
 
-  const dirLabel = environmentId ? `项目在环境「${selectedEnvironment?.name ?? ''}」上的路径` : '项目路径（本机）'
+  const dirLabel = environmentId
+    ? '被测项目目录（在环境上的路径）'
+    : '被测项目目录（本机路径）'
   const modelPlaceholder = isCLIAgent ? (modelOptions?.configured ? modelOptions.model : '智能体默认模型') : '例如 deepseek-chat'
   const modelChoices = useMemo(() => {
     const set = new Set<string>()
@@ -125,7 +127,8 @@ export function ExecuteRunDialog({ projects, environments, agents, testCases, de
               <input value={model} onChange={(event) => setModel(event.target.value)} placeholder={currentAgent.model || '接口模型名'} />
             ) : null}
           </label>
-          <label className="field field--full"><span>{dirLabel}</span><input value={workspaceDir} onChange={(event) => setWorkspaceDir(event.target.value)} placeholder={environmentId ? '例如 /opt/app/under-test' : '智能体将在此目录内实际执行验证'} required /></label>
+          <label className="field field--full"><span>{dirLabel}</span><input value={workspaceDir} onChange={(event) => setWorkspaceDir(event.target.value)} placeholder={environmentId ? '例如 /opt/usb-copy（环境机器上的路径）' : '例如 D:\\repos\\usb-copy-web（智能体在此目录读代码、跑测试）'} required />
+          <small className="field field--full muted-text">智能体会进入此目录读源码、运行测试/脚本作为执行证据。项目背景与知识库会自动提供给智能体。</small></label>
           {agents.length === 0 ? <small className="field field--full muted-text">还没有可用的智能体，请先到「连接设置 → AI 智能体」添加（支持本机 Claude Code / Codex）。</small> : null}
           {environmentId ? <small className="field field--full muted-text">将在环境「{selectedEnvironment?.name}」上通过 SSH 执行，要求该环境已安装对应的 CLI 智能体（{currentAgent?.type}）。</small> : null}
         </div>

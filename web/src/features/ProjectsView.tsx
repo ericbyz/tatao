@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { listTAPDWorkspaces, updateProject } from '../app/api'
+import { deleteKnowledge, listKnowledge, listTAPDWorkspaces, saveKnowledge, updateProject } from '../app/api'
+import type { KnowledgeEntry } from '../app/types'
 import type { Project, TAPDWorkspace } from '../app/types'
 import { Icon } from '../components/Icon'
 import { Modal } from '../components/Modal'
@@ -106,6 +107,8 @@ export function ProjectsView({ projects, selectedId, onSelect, onCreate, onSync,
             </button>
           </div>
           <ContextSection project={selectedProject} notify={notify} />
+
+          <KnowledgeSection projectId={selectedProject.id} notify={notify} />
 
           <section className="detail-section">
             <h3>项目信息</h3>
@@ -300,5 +303,116 @@ function ContextSection({ project, notify }: { project: Project; notify: (messag
         </div>
       )}
     </section>
+  )
+}
+
+const knowledgeCategories = ['功能导航', '数据与文件约定', '接口与服务', '账号与凭据', '术语解释', '禁忌与风险']
+
+// KnowledgeSection 维护项目知识库：设计/执行用例时这些条目会注入智能体提示词。
+function KnowledgeSection({ projectId, notify }: { projectId: string; notify: (message: string, tone?: 'success' | 'error') => void }) {
+  const [entries, setEntries] = useState<KnowledgeEntry[]>([])
+  const [editing, setEditing] = useState<KnowledgeEntry | 'new' | null>(null)
+  const [expanded, setExpanded] = useState<string | null>(null)
+
+  useEffect(() => {
+    setEntries([])
+    setEditing(null)
+    listKnowledge(projectId).then(setEntries).catch(() => setEntries([]))
+  }, [projectId])
+
+  const remove = async (entry: KnowledgeEntry) => {
+    try {
+      await deleteKnowledge(entry.id)
+      setEntries((current) => current.filter((item) => item.id !== entry.id))
+    } catch (error) {
+      notify(error instanceof Error ? error.message : '删除失败', 'error')
+    }
+  }
+
+  return (
+    <section className="detail-section">
+      <div className="kb-head">
+        <h3>项目知识库</h3>
+        <button className="button button--small" type="button" onClick={() => setEditing('new')}><Icon name="plus" size={14} /> 新增</button>
+      </div>
+      {editing !== null ? (
+        <KnowledgeEditDialog
+          projectId={projectId}
+          entry={editing === 'new' ? null : editing}
+          onClose={() => setEditing(null)}
+          onSaved={(saved) => {
+            setEntries((current) => {
+              const next = current.filter((item) => item.id !== saved.id)
+              return [saved, ...next]
+            })
+            setEditing(null)
+          }}
+          notify={notify}
+        />
+      ) : null}
+      <div className="kb-list">
+        {entries.map((entry) => (
+          <div key={entry.id} className="kb-entry">
+            <div className="kb-entry__head" onClick={() => setExpanded(expanded === entry.id ? null : entry.id)}>
+              <span className="kb-entry__cat">{entry.category}</span>
+              <strong>{entry.title}</strong>
+              <div className="kb-entry__actions">
+                <button className="row-action" type="button" aria-label="编辑" onClick={(event) => { event.stopPropagation(); setEditing(entry) }}><Icon name="dots" size={15} /></button>
+                <button className="row-action" type="button" aria-label="删除" onClick={(event) => { event.stopPropagation(); void remove(entry) }}><Icon name="close" size={15} /></button>
+              </div>
+            </div>
+            {expanded === entry.id ? <p className="kb-entry__content">{entry.content}</p> : null}
+          </div>
+        ))}
+        {entries.length === 0 ? <p className="detail-empty">还没有知识条目。录入功能入口、数据约定、账号、禁忌等，智能体设计与执行用例时会自动引用。</p> : null}
+      </div>
+    </section>
+  )
+}
+
+function KnowledgeEditDialog({ projectId, entry, onClose, onSaved, notify }: {
+  projectId: string
+  entry: KnowledgeEntry | null
+  onClose: () => void
+  onSaved: (saved: KnowledgeEntry) => void
+  notify: (message: string, tone?: 'success' | 'error') => void
+}) {
+  const [category, setCategory] = useState(entry?.category ?? knowledgeCategories[0])
+  const [title, setTitle] = useState(entry?.title ?? '')
+  const [content, setContent] = useState(entry?.content ?? '')
+  const [saving, setSaving] = useState(false)
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault()
+    setSaving(true)
+    try {
+      const saved = await saveKnowledge(projectId, { id: entry?.id, category, title: title.trim(), content: content.trim() })
+      onSaved(saved)
+    } catch (error) {
+      notify(error instanceof Error ? error.message : '保存失败', 'error')
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Modal title={entry ? '编辑知识条目' : '新增知识条目'} description="这些知识会在设计与执行用例时提供给智能体。" onClose={onClose} width="wide">
+      <form onSubmit={submit}>
+        <div className="form-stack">
+          <div className="form-grid">
+            <label className="field"><span>类别</span>
+              <select value={category} onChange={(event) => setCategory(event.target.value)}>
+                {knowledgeCategories.map((value) => <option key={value} value={value}>{value}</option>)}
+              </select>
+            </label>
+            <label className="field"><span>标题</span><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="例如：创建同步任务的步骤" required /></label>
+            <label className="field field--full"><span>内容</span><textarea value={content} onChange={(event) => setContent(event.target.value)} rows={6} placeholder={'例如：入口在「任务管理」→「新建任务」；需要选择源目录与目标目录；配置保存在 config/tasks.json…'} required /></label>
+          </div>
+        </div>
+        <footer className="modal__footer">
+          <button className="button" type="button" onClick={onClose}>取消</button>
+          <button className="button button--primary" type="submit" disabled={saving}>{saving ? '保存中…' : '保存条目'}</button>
+        </footer>
+      </form>
+    </Modal>
   )
 }

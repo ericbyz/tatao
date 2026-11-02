@@ -319,6 +319,9 @@ func TestPutTAPDSettingsRequiresUserForOpenAPI(t *testing.T) {
 	}
 }
 
+// llmPrompts 记录 fakeLLM 收到的提示词，供断言上下文注入。
+var llmPrompts []string
+
 // fakeLLM 模拟 OpenAI 兼容 chat/completions，返回结构化用例 JSON。
 func fakeLLM(t *testing.T) *httptest.Server {
 	t.Helper()
@@ -333,6 +336,9 @@ func fakeLLM(t *testing.T) *httptest.Server {
 			} `json:"messages"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&request)
+		for _, message := range request.Messages {
+			llmPrompts = append(llmPrompts, message.Content)
+		}
 		userContent := request.Messages[len(request.Messages)-1].Content
 		count := strings.Count(userContent, "[素材")
 		var drafts []map[string]any
@@ -426,5 +432,48 @@ func TestAgentsCRUDMasksKey(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
 		t.Fatalf("expected %d, got %d", http.StatusOK, response.Code)
+	}
+}
+
+func TestKnowledgeInjectedIntoDesignPrompt(t *testing.T) {
+	// given: 项目 + 素材 + 一条知识条目
+	llm := fakeLLM(t)
+	defer llm.Close()
+	tapdServer := httptest.NewServer(&fakeTAPD{})
+	defer tapdServer.Close()
+	memory := store.NewMemory()
+	handler := httpapi.New(memory, newOpenAPIGateway(t, tapdServer.URL))
+	gateway := newOpenAPIGateway(t, tapdServer.URL)
+	project := memory.AddProject(domain.Project{Name: "支付网关", Source: domain.ProjectSourceTAPD, TAPDWorkspaceID: "1001"})
+	items, err := gateway.Sync(context.Background(), "1001", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	memory.UpsertExternalItems(project.ID, items)
+	savedAgent := memory.PutAgent(domain.AgentConfig{Name: "设计智能体", BaseURL: llm.URL, Model: "fake-model"}, "sk-secret")
+	knowledgeBody, _ := json.Marshal(map[string]string{
+		"category": "功能导航",
+		"title":    "创建同步任务的入口",
+		"content":  "任务管理 → 新建任务，必选源目录与目标目录",
+	})
+	knowledgeResp := httptest.NewRecorder()
+	handler.ServeHTTP(knowledgeResp, httptest.NewRequest(http.MethodPost, "/api/projects/"+project.ID+"/knowledge", bytes.NewReader(knowledgeBody)))
+	if knowledgeResp.Code != http.StatusCreated {
+		t.Fatalf("knowledge create failed: %d", knowledgeResp.Code)
+	}
+	llmPrompts = nil
+
+	// when: 指定智能体生成用例
+	body, _ := json.Marshal(map[string]any{"projectId": project.ID, "itemIds": []string{"1100000001"}, "agentId": savedAgent.ID})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/test-cases/generate", bytes.NewReader(body)))
+	if response.Code != http.StatusCreated {
+		t.Fatalf("expected %d, got %d: %s", http.StatusCreated, response.Code, response.Body.String())
+	}
+
+	// then: 设计提示词包含知识条目
+	combined := strings.Join(llmPrompts, "\n")
+	if !strings.Contains(combined, "创建同步任务的入口") || !strings.Contains(combined, "【项目知识库】") {
+		t.Fatalf("knowledge missing. prompts=%d len=%d content=%.2400s", len(llmPrompts), len(combined), combined)
 	}
 }

@@ -97,7 +97,7 @@ func DesignTestCases(ctx context.Context, cfg Config, items []domain.ExternalIte
 		return nil, nil
 	}
 
-	prompt := buildSystemPrompt() + "\n\n" + buildPrompt(items)
+	prompt := buildSystemPrompt() + "\n\n" + buildContextBlock(extraContext) + buildPrompt(items)
 	if cfg.isCLI() {
 		content, err := chatCLI(ctx, cfg, prompt)
 		if err != nil {
