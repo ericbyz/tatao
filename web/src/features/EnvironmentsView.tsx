@@ -128,7 +128,8 @@ function AssignmentDialog({ environment, projects, onClose, onAssign }: { enviro
 }
 
 
-// EnvironmentKnowledgeDialog 展示环境知识条目，一键 AI 探索自动沉淀。
+// EnvironmentKnowledgeDialog 环境知识库：顶部探索配置卡（环境信息 + 探索重点 +
+// 一键探索），下方为已沉淀的知识条目列表。
 function EnvironmentKnowledgeDialog({ environment, agents, onClose, notify }: {
   environment: Environment
   agents: { id: string; name: string; type: string; isDefault?: boolean }[]
@@ -136,7 +137,6 @@ function EnvironmentKnowledgeDialog({ environment, agents, onClose, notify }: {
   notify: (message: string, tone?: 'success' | 'error') => void
 }) {
   const [entries, setEntries] = useState<KnowledgeEntry[]>([])
-  const [loaded, setLoaded] = useState(false)
   const [exploring, setExploring] = useState(false)
   const [expanded, setExpanded] = useState<string | null>(null)
 
@@ -158,14 +158,27 @@ function EnvironmentKnowledgeDialog({ environment, agents, onClose, notify }: {
   }
 
   return (
-    <Modal title={'环境知识库 · '+environment.name} description="AI 只读探索环境（部署的服务、端口、配置、风险），沉淀为知识供用例设计与执行引用。" onClose={onClose} width="wide">
-      <div className="kb-head">
-        <h3 style={{ fontSize: 13 }}>知识条目（{entries.length}）</h3>
-        <button className="button button--small button--primary" type="button" disabled={exploring} onClick={() => void explore()}>
-          <Icon name="search" size={14} /> {exploring ? 'AI 探索中…（1-3 分钟）' : 'AI 探索环境'}
+    <Modal title={`环境知识库 · ${environment.name}`} description="AI 只读探索环境（部署的服务、端口、配置、风险），沉淀为知识供用例设计与执行引用。" onClose={onClose} width="wide">
+      <div className="explore-card">
+        <div className="explore-card__info">
+          <div className="explore-card__meta">
+            <div><span>主机</span><strong className="mono">{environment.host}:{environment.port}</strong></div>
+            <div><span>账号</span><strong>{environment.username}</strong></div>
+            <div><span>认证</span><strong>{environment.authType === 'ssh_key' ? 'SSH 私钥' : '密码'}</strong></div>
+          </div>
+          <div className="explore-card__prompt">
+            <span>探索重点</span>
+            <p>{environment.explorePrompt?.trim() || '默认范围：部署的服务与应用、监听端口、启动与验证命令、配置与数据目录、领域术语、风险与禁忌。'}</p>
+          </div>
+        </div>
+        <button className="button button--primary explore-card__cta" type="button" disabled={exploring} onClick={() => void explore()}>
+          <Icon name="search" size={16} /> {exploring ? 'AI 探索中…（1-3 分钟）' : '开始 AI 探索'}
         </button>
+        <small className="explore-card__note">只读探索：智能体仅查看系统信息，不会修改、重启任何服务。首次探索约需 1-3 分钟。</small>
       </div>
-      <div className="kb-list">
+
+      <div className="env-kb-list">
+        <div className="env-kb-list__head"><span>已沉淀知识（{entries.length}）</span></div>
         {entries.map((entry) => (
           <div key={entry.id} className="kb-entry">
             <div className="kb-entry__head" onClick={() => setExpanded(expanded === entry.id ? null : entry.id)}>
@@ -179,7 +192,7 @@ function EnvironmentKnowledgeDialog({ environment, agents, onClose, notify }: {
             {expanded === entry.id ? <p className="kb-entry__content">{entry.content}</p> : null}
           </div>
         ))}
-        {entries.length === 0 ? <div className="empty-inline">{loaded || entries.length === 0 ? '点击「AI 探索环境」让智能体自动探索并沉淀知识。' : ''}</div> : null}
+        {entries.length === 0 ? <div className="empty-inline">还没有沉淀知识，点击上方「开始 AI 探索」。</div> : null}
       </div>
     </Modal>
   )

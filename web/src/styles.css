@@ -555,3 +555,15 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 
 /* 弹窗内 small 说明文字排版 */
 .modal .field small, .modal small.muted-text { line-height: 1.55; }
+
+.explore-card { margin-bottom: 16px; padding: 16px; background: linear-gradient(135deg, #f2f7ff 0%, #f7f9fc 100%); border: 1px solid #dbe7f7; border-radius: 10px; }
+.explore-card__meta { display: flex; gap: 26px; margin-bottom: 12px; }
+.explore-card__meta > div { display: grid; gap: 2px; }
+.explore-card__meta span { color: var(--subtle); font-size: 11px; }
+.explore-card__meta strong { color: #1e2f44; font-size: 12.5px; font-weight: 600; }
+.explore-card__prompt { padding: 10px 12px; background: rgba(255, 255, 255, .75); border: 1px dashed #b9cde8; border-radius: 8px; }
+.explore-card__prompt span { color: var(--blue); font-size: 11px; font-weight: 640; }
+.explore-card__prompt p { margin: 4px 0 0; color: #44566d; font-size: 12px; line-height: 1.6; }
+.explore-card__cta { width: 100%; height: 40px; margin-top: 12px; font-size: 13.5px; }
+.explore-card__note { display: block; margin-top: 9px; color: var(--subtle); font-size: 11px; text-align: center; }
+.env-kb-list__head { padding: 8px 0 8px; color: #3c4d63; font-size: 12px; font-weight: 640; }

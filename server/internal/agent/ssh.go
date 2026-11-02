@@ -29,9 +29,7 @@ func runRemote(ctx context.Context, cfg Config, prompt string, cliName string, a
 	if env == nil || env.Host == "" {
 		return "", errors.New("远程环境缺少主机地址")
 	}
-	if cfg.WorkDir == "" {
-		return "", errors.New("缺少项目在环境上的路径")
-	}
+	// WorkDir 为空表示机器级探索，直接在登录目录执行
 
 	client, err := ssh.Dial("tcp", fmt.Sprintf("%s:%d", env.Host, env.Port), &ssh.ClientConfig{
 		User:            env.Username,
@@ -51,7 +49,11 @@ func runRemote(ctx context.Context, cfg Config, prompt string, cliName string, a
 	}
 	defer func() { _ = session.Close() }()
 
-	remoteCommand := "cd " + shellQuote(cfg.WorkDir) + " && " + cliName + " " + joinQuoted(args)
+	pathBootstrap := "export PATH=\"$HOME/.local/bin:$HOME/.npm-global/bin:/usr/local/bin:/usr/bin:$PATH\";"
+	remoteCommand := pathBootstrap + " " + cliName + " " + joinQuoted(args)
+	if cfg.WorkDir != "" {
+		remoteCommand = "cd " + shellQuote(cfg.WorkDir) + " && " + remoteCommand
+	}
 	session.Stdin = strings.NewReader(prompt)
 	var stdout, stderr bytes.Buffer
 	session.Stdout = &stdout
@@ -63,7 +65,11 @@ func runRemote(ctx context.Context, cfg Config, prompt string, cliName string, a
 	select {
 	case err := <-done:
 		if err != nil {
-			return "", fmt.Errorf("远程执行失败：%w：%s", err, truncate(stderr.String(), 300))
+			message := truncate(stderr.String(), 300)
+			if strings.Contains(stderr.String(), "command not found") {
+				message = "目标环境未找到 CLI 智能体（" + cliName + "），请先在环境上安装，或改用已安装的智能体"
+			}
+			return "", fmt.Errorf("远程执行失败：%w：%s", err, message)
 		}
 	case <-ctx.Done():
 		_ = session.Close()
