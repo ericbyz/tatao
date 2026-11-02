@@ -91,7 +91,8 @@ func RunPrompt(ctx context.Context, cfg Config, prompt string) (string, error) {
 }
 
 // DesignTestCases 为一批素材设计用例，返回与输入顺序一致的草稿。
-func DesignTestCases(ctx context.Context, cfg Config, items []domain.ExternalItem) ([]TestCaseDraft, error) {
+// extraContext 是被测项目的背景说明（技术栈、启动/测试命令等）。
+func DesignTestCases(ctx context.Context, cfg Config, items []domain.ExternalItem, extraContext string) ([]TestCaseDraft, error) {
 	if len(items) == 0 {
 		return nil, nil
 	}

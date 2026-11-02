@@ -15,6 +15,7 @@ type Project struct {
 	Source           ProjectSource `json:"source"`
 	LocalPath        string        `json:"localPath,omitempty"`
 	TAPDWorkspaceID  string        `json:"tapdWorkspaceId,omitempty"`
+	Context          string        `json:"context,omitempty"`
 	EnvironmentCount int           `json:"environmentCount"`
 	CaseCount        int           `json:"caseCount"`
 	Status           string        `json:"status"`
@@ -30,6 +31,7 @@ type Environment struct {
 	Port       int      `json:"port"`
 	Username   string   `json:"username"`
 	AuthType   string   `json:"authType"`
+	Notes      string   `json:"notes,omitempty"` // 访问方式/服务地址/注意事项
 	SecretSet  bool     `json:"secretSet"`
 	Status     string   `json:"status"`
 }

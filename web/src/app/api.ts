@@ -49,6 +49,10 @@ export function createProject(input: Pick<Project, 'name' | 'source'> & Partial<
   return request<Project>('/api/projects', { method: 'POST', body: JSON.stringify(input) })
 }
 
+export function updateProject(id: string, input: { name?: string; context: string }) {
+  return request<Project>('/api/projects/' + id, { method: 'PATCH', body: JSON.stringify(input) })
+}
+
 export function createEnvironment(input: Omit<Environment, 'id' | 'projectIds' | 'os' | 'secretSet' | 'status'> & { secret: string }) {
   return request<Environment>('/api/environments', { method: 'POST', body: JSON.stringify(input) })
 }

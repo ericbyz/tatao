@@ -28,7 +28,8 @@ type caseOutcome struct {
 }
 
 // ExecuteCase 在 workspaceDir 中调用智能体实际执行一条测试用例。
-func ExecuteCase(ctx context.Context, cfg agent.Config, workspaceDir string, testCase domain.TestCase) (Outcome, int64, error) {
+// source 是用例关联的 TAPD 素材原文（可空），extraContext 是被测项目背景说明。
+func ExecuteCase(ctx context.Context, cfg agent.Config, workspaceDir string, testCase domain.TestCase, source *domain.ExternalItem, extraContext string) (Outcome, int64, error) {
 	if workspaceDir == "" {
 		return Outcome{}, 0, errors.New("缺少被测项目工作目录")
 	}
@@ -36,7 +37,7 @@ func ExecuteCase(ctx context.Context, cfg agent.Config, workspaceDir string, tes
 	runCfg.WorkDir = workspaceDir
 	runCfg.ExtraArgs = withExecutionPermissions(runCfg)
 
-	prompt := buildExecutionPrompt(workspaceDir, testCase)
+	prompt := buildExecutionPrompt(workspaceDir, testCase, source, extraContext)
 	start := time.Now()
 	output, err := agent.RunPrompt(ctx, runCfg, prompt)
 	duration := time.Since(start)
@@ -92,11 +93,30 @@ func joinArgs(base, addition string) string {
 	return base + " " + addition
 }
 
-func buildExecutionPrompt(workspaceDir string, testCase domain.TestCase) string {
+func buildExecutionPrompt(workspaceDir string, testCase domain.TestCase, source *domain.ExternalItem, extraContext string) string {
 	var builder strings.Builder
 	builder.WriteString("你是测试执行工程师。被测项目位于目录：")
 	builder.WriteString(workspaceDir)
-	builder.WriteString("。\n请实际执行下面这条测试用例并给出结论。\n\n")
+	builder.WriteString("。\n")
+	if strings.TrimSpace(extraContext) != "" {
+		builder.WriteString("\n【项目背景】\n")
+		builder.WriteString(strings.TrimSpace(extraContext))
+		builder.WriteString("\n")
+	}
+	if source != nil {
+		builder.WriteString("\n【用例来源素材（")
+		builder.WriteString(source.Kind)
+		builder.WriteString(" ")
+		builder.WriteString(source.ID)
+		builder.WriteString("）原文】\n")
+		builder.WriteString(source.Title)
+		if strings.TrimSpace(source.Description) != "" {
+			builder.WriteString("\n")
+			builder.WriteString(source.Description)
+		}
+		builder.WriteString("\n")
+	}
+	builder.WriteString("\n请实际执行下面这条测试用例并给出结论。\n\n")
 	builder.WriteString("【用例标题】")
 	builder.WriteString(testCase.Title)
 	builder.WriteString("\n")

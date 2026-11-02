@@ -541,6 +541,25 @@ func (m *Memory) Run(id string) (domain.TestRun, bool) {
 	return m.runs[index], true
 }
 
+// UpdateProject 更新项目基础信息与上下文说明。
+func (m *Memory) UpdateProject(id string, name, context string) (domain.Project, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	index := slices.IndexFunc(m.projects, func(project domain.Project) bool {
+		return project.ID == id
+	})
+	if index < 0 {
+		return domain.Project{}, false
+	}
+	if strings.TrimSpace(name) != "" {
+		m.projects[index].Name = strings.TrimSpace(name)
+	}
+	m.projects[index].Context = context
+	m.projects[index].UpdatedAt = time.Now()
+	m.persist()
+	return m.projects[index], true
+}
+
 // Environment 按 ID 查找测试环境。
 func (m *Memory) Environment(id string) (domain.Environment, bool) {
 	m.mu.RLock()

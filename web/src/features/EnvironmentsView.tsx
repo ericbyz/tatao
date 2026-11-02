@@ -53,6 +53,7 @@ function EnvironmentDialog({ onClose, onCreate }: { onClose: () => void; onCreat
   const [port, setPort] = useState(22)
   const [username, setUsername] = useState('')
   const [authType, setAuthType] = useState<Environment['authType']>('password')
+  const [notes, setNotes] = useState('')
   const [secret, setSecret] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
@@ -60,7 +61,7 @@ function EnvironmentDialog({ onClose, onCreate }: { onClose: () => void; onCreat
     event.preventDefault()
     setSubmitting(true)
     try {
-      await onCreate({ name, host, port, username, authType, secret })
+      await onCreate({ name, host, port, username, authType, notes: notes.trim() || undefined, secret })
     } finally {
       setSubmitting(false)
     }
@@ -75,6 +76,7 @@ function EnvironmentDialog({ onClose, onCreate }: { onClose: () => void; onCreat
           <label className="field"><span>SSH 端口</span><input type="number" value={port} onChange={(event) => setPort(Number(event.target.value))} min="1" max="65535" required/></label>
           <label className="field"><span>账号</span><input value={username} onChange={(event) => setUsername(event.target.value)} placeholder="tester" required/></label>
           <label className="field"><span>认证方式</span><select value={authType} onChange={(event) => setAuthType(event.target.value as Environment['authType'])}><option value="password">密码</option><option value="ssh_key">SSH 私钥</option></select></label>
+          <label className="field field--full"><span>备注（服务地址 / 注意事项，执行时提供给智能体）</span><input value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="例如：应用端口 8080，管理端 /admin，测试账号 admin/test123" /></label>
           <label className="field field--full"><span>{authType === 'password' ? '密码' : 'SSH 私钥'}</span>{authType === 'password' ? <input type="password" value={secret} onChange={(event) => setSecret(event.target.value)} autoComplete="new-password" required/> : <textarea value={secret} onChange={(event) => setSecret(event.target.value)} rows={4} placeholder="-----BEGIN OPENSSH PRIVATE KEY-----" required/>}</label>
         </div>
         <footer className="modal__footer"><button className="button" type="button" onClick={onClose}>取消</button><button className="button button--primary" type="submit" disabled={submitting}>{submitting ? '保存中…' : '保存环境'}</button></footer>

@@ -35,6 +35,7 @@ type Store interface {
 	SetTAPDSettings(domain.TAPDSettings)
 	Agents() []domain.AgentConfig
 	Agent(id string) (domain.AgentConfig, bool)
+	UpdateProject(id, name, context string) (domain.Project, bool)
 	PutAgent(agent domain.AgentConfig, secret string) domain.AgentConfig
 	DeleteAgent(id string) bool
 	CreateRun(run domain.TestRun) domain.TestRun
@@ -66,6 +67,7 @@ func New(store Store, gateway TAPDGateway) http.Handler {
 	mux.HandleFunc("GET /api/health", handler.health)
 	mux.HandleFunc("GET /api/projects", handler.listProjects)
 	mux.HandleFunc("POST /api/projects", handler.createProject)
+	mux.HandleFunc("PATCH /api/projects/{id}", handler.updateProject)
 	mux.HandleFunc("GET /api/environments", handler.listEnvironments)
 	mux.HandleFunc("POST /api/environments", handler.createEnvironment)
 	mux.HandleFunc("PATCH /api/environments/{id}/projects", handler.assignEnvironment)
@@ -120,6 +122,23 @@ func (h *Handler) createProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, h.store.AddProject(input))
+}
+
+func (h *Handler) updateProject(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Name    string `json:"name"`
+		Context string `json:"context"`
+	}
+	if err := decodeJSON(r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	project, ok := h.store.UpdateProject(r.PathValue("id"), input.Name, input.Context)
+	if !ok {
+		writeError(w, http.StatusNotFound, "项目不存在")
+		return
+	}
+	writeJSON(w, http.StatusOK, project)
 }
 
 func (h *Handler) listEnvironments(w http.ResponseWriter, _ *http.Request) {
@@ -526,7 +545,8 @@ func (h *Handler) generateTestCases(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "请选择要生成用例的素材")
 		return
 	}
-	if _, ok := h.store.Project(input.ProjectID); !ok {
+	project, ok := h.store.Project(input.ProjectID)
+	if !ok {
 		writeError(w, http.StatusNotFound, "项目不存在")
 		return
 	}
@@ -558,7 +578,7 @@ func (h *Handler) generateTestCases(w http.ResponseWriter, r *http.Request) {
 		if strings.TrimSpace(input.Model) != "" {
 			cfg.Model = strings.TrimSpace(input.Model)
 		}
-		drafts, err := agent.DesignTestCases(r.Context(), cfg, items)
+		drafts, err := agent.DesignTestCases(r.Context(), cfg, items, project.Context)
 		if err != nil {
 			writeError(w, http.StatusBadGateway, "智能体生成失败："+err.Error())
 			return
@@ -818,18 +838,28 @@ func (h *Handler) createRun(w http.ResponseWriter, r *http.Request) {
 		Total:           len(cases),
 	})
 
-	go h.executeRun(run, cfg, cases)
+	go h.executeRun(run, cfg, cases, project.Context)
 	writeJSON(w, http.StatusCreated, run)
 }
 
 // executeRun 串行执行批次内全部用例，实时回写结果。
-func (h *Handler) executeRun(run domain.TestRun, cfg agent.Config, cases []domain.TestCase) {
+func (h *Handler) executeRun(run domain.TestRun, cfg agent.Config, cases []domain.TestCase, projectContext string) {
 	ctx := context.Background()
+	sourceItems := h.store.ExternalItems(run.ProjectID)
 	for _, testCase := range cases {
+		var source *domain.ExternalItem
+		if testCase.ExternalID != "" {
+			for index := range sourceItems {
+				if sourceItems[index].ID == testCase.ExternalID {
+					source = &sourceItems[index]
+					break
+				}
+			}
+		}
 		run.CurrentTitle = testCase.Title
 		h.store.SaveRun(run)
 
-		outcome, durationMs, err := executor.ExecuteCase(ctx, cfg, run.WorkspaceDir, testCase)
+		outcome, durationMs, err := executor.ExecuteCase(ctx, cfg, run.WorkspaceDir, testCase, source, projectContext)
 		result := domain.RunCaseResult{
 			CaseID:     testCase.ID,
 			Title:      testCase.Title,

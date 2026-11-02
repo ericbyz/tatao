@@ -6,6 +6,7 @@ export type Project = {
   source: 'local' | 'tapd'
   localPath?: string
   tapdWorkspaceId?: string
+  context?: string
   environmentCount: number
   caseCount: number
   status: 'ready' | 'needs_setup'
@@ -21,6 +22,7 @@ export type Environment = {
   port: number
   username: string
   authType: 'password' | 'ssh_key'
+  notes?: string
   secretSet: boolean
   status: 'online' | 'unchecked' | 'offline'
 }

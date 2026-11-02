@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { listTAPDWorkspaces } from '../app/api'
+import { listTAPDWorkspaces, updateProject } from '../app/api'
 import type { Project, TAPDWorkspace } from '../app/types'
 import { Icon } from '../components/Icon'
 import { Modal } from '../components/Modal'
@@ -105,6 +105,8 @@ export function ProjectsView({ projects, selectedId, onSelect, onCreate, onSync,
               <Icon name="refresh" size={17} /> 同步 TAPD
             </button>
           </div>
+          <ContextSection project={selectedProject} notify={notify} />
+
           <section className="detail-section">
             <h3>项目信息</h3>
             <dl className="detail-list">
@@ -249,3 +251,54 @@ function CreateProjectDialog({ onClose, onCreate }: { onClose: () => void; onCre
   )
 }
 
+
+// ContextSection 编辑项目上下文说明：这是执行时喂给智能体的被测系统背景。
+function ContextSection({ project, notify }: { project: Project; notify: (message: string, tone?: 'success' | 'error') => void }) {
+  const [editing, setEditing] = useState(false)
+  const [text, setText] = useState(project.context ?? '')
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    setEditing(false)
+    setText(project.context ?? '')
+  }, [project.id, project.context])
+
+  const save = async () => {
+    setSaving(true)
+    try {
+      await updateProject(project.id, { context: text })
+      notify('项目上下文已保存，执行用例时会提供给智能体')
+      setEditing(false)
+    } catch (error) {
+      notify(error instanceof Error ? error.message : '保存失败', 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <section className="detail-section">
+      <h3>项目上下文</h3>
+      {editing ? (
+        <div className="form-stack">
+          <textarea
+            className="context-editor"
+            value={text}
+            onChange={(event) => setText(event.target.value)}
+            rows={6}
+            placeholder={'被测系统是什么、技术栈、如何启动与运行测试、注意事项…\n执行与设计用例时会作为背景提供给智能体。'}
+          />
+          <div className="context-actions">
+            <button className="button button--small" type="button" onClick={() => { setEditing(false); setText(project.context ?? '') }}>取消</button>
+            <button className="button button--small button--primary" type="button" disabled={saving} onClick={() => void save()}>{saving ? '保存中…' : '保存'}</button>
+          </div>
+        </div>
+      ) : (
+        <div>
+          <p className="context-text">{project.context ? project.context : '尚未填写。描述被测系统、技术栈、启动/测试命令，执行时会提供给智能体。'}</p>
+          <button className="button button--small" type="button" onClick={() => setEditing(true)}><Icon name="clipboard" size={14} /> 编辑上下文</button>
+        </div>
+      )}
+    </section>
+  )
+}

@@ -29,7 +29,7 @@ func TestDesignWithRealClaude(t *testing.T) {
 		Status:      "closed", Priority: "P1",
 	}}
 	start := time.Now()
-	drafts, err := agent.DesignTestCases(context.Background(), cfg, items)
+	drafts, err := agent.DesignTestCases(context.Background(), cfg, items, "")
 	elapsed := time.Since(start)
 	if err != nil {
 		t.Fatalf("real claude design failed after %s: %v", elapsed.Round(time.Second), err)

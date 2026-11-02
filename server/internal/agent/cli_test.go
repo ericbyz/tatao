@@ -35,7 +35,7 @@ func TestDesignViaCLICustomCommand(t *testing.T) {
 	drafts, err := agent.DesignTestCases(context.Background(), cfg, []domain.ExternalItem{
 		{ID: "b1", Kind: "bug", Title: "登录超时"},
 		{ID: "b2", Kind: "bug", Title: "页面空白"},
-	})
+	}, "")
 	if err != nil {
 		t.Fatalf("design failed: %v", err)
 	}
