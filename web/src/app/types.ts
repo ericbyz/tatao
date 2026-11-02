@@ -151,5 +151,7 @@ export type KnowledgeEntry = {
   category: string
   title: string
   content: string
+  source?: 'manual' | 'ai'
+  generatedBy?: string
   createdAt: string
 }

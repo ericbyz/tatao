@@ -140,18 +140,28 @@ func buildExecutionPrompt(workspaceDir string, testCase domain.TestCase, source 
 	return builder.String()
 }
 
-// ExtractJSON 从模型输出中提取第一个 JSON 对象，容忍代码块与前后缀文本。
+// ExtractJSON 从模型输出中提取第一个 JSON 值（对象或数组），容忍代码块与
+// 前后缀文本；按先出现的结构定界。
 func ExtractJSON(content string) string {
 	trimmed := strings.TrimSpace(content)
 	trimmed = strings.TrimPrefix(trimmed, "```json")
 	trimmed = strings.TrimPrefix(trimmed, "```")
 	trimmed = strings.TrimSuffix(trimmed, "```")
-	start := strings.Index(trimmed, "{")
-	end := strings.LastIndex(trimmed, "}")
-	if start < 0 || end <= start {
-		return trimmed
+	objectStart := strings.Index(trimmed, "{")
+	arrayStart := strings.Index(trimmed, "[")
+	switch {
+	case arrayStart >= 0 && (objectStart < 0 || arrayStart < objectStart):
+		end := strings.LastIndex(trimmed, "]")
+		if end > arrayStart {
+			return trimmed[arrayStart : end+1]
+		}
+	case objectStart >= 0:
+		end := strings.LastIndex(trimmed, "}")
+		if end > objectStart {
+			return trimmed[objectStart : end+1]
+		}
 	}
-	return trimmed[start : end+1]
+	return trimmed
 }
 
 func truncate(value string, limit int) string {

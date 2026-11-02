@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { deleteKnowledge, listKnowledge, listTAPDWorkspaces, saveKnowledge, updateProject } from '../app/api'
-import type { KnowledgeEntry } from '../app/types'
+import { deleteKnowledge, exploreKnowledge, listKnowledge, listTAPDWorkspaces, saveKnowledge, updateProject } from '../app/api'
+import type { AgentConfig, KnowledgeEntry } from '../app/types'
 import type { Project, TAPDWorkspace } from '../app/types'
 import { Icon } from '../components/Icon'
 import { Modal } from '../components/Modal'
@@ -8,6 +8,7 @@ import { StatusTag } from '../components/StatusTag'
 
 type ProjectsViewProps = {
   projects: Project[]
+  agents: AgentConfig[]
   selectedId: string
   onSelect: (id: string) => void
   onCreate: (project: Pick<Project, 'name' | 'source'> & Partial<Project>) => Promise<void>
@@ -25,7 +26,7 @@ function formatDate(value: string) {
   }).format(new Date(value))
 }
 
-export function ProjectsView({ projects, selectedId, onSelect, onCreate, onSync, notify }: ProjectsViewProps) {
+export function ProjectsView({ projects, agents, selectedId, onSelect, onCreate, onSync, notify }: ProjectsViewProps) {
   const [query, setQuery] = useState('')
   const [dialogOpen, setDialogOpen] = useState(false)
   const selectedProject = projects.find((project) => project.id === selectedId) ?? projects[0]
@@ -108,7 +109,7 @@ export function ProjectsView({ projects, selectedId, onSelect, onCreate, onSync,
           </div>
           <ContextSection project={selectedProject} notify={notify} />
 
-          <KnowledgeSection projectId={selectedProject.id} notify={notify} />
+          <KnowledgeSection projectId={selectedProject.id} agents={agents} notify={notify} />
 
           <section className="detail-section">
             <h3>项目信息</h3>
@@ -309,10 +310,11 @@ function ContextSection({ project, notify }: { project: Project; notify: (messag
 const knowledgeCategories = ['功能导航', '数据与文件约定', '接口与服务', '账号与凭据', '术语解释', '禁忌与风险']
 
 // KnowledgeSection 维护项目知识库：设计/执行用例时这些条目会注入智能体提示词。
-function KnowledgeSection({ projectId, notify }: { projectId: string; notify: (message: string, tone?: 'success' | 'error') => void }) {
+function KnowledgeSection({ projectId, agents, notify }: { projectId: string; agents: AgentConfig[]; notify: (message: string, tone?: 'success' | 'error') => void }) {
   const [entries, setEntries] = useState<KnowledgeEntry[]>([])
   const [editing, setEditing] = useState<KnowledgeEntry | 'new' | null>(null)
   const [expanded, setExpanded] = useState<string | null>(null)
+  const [exploring, setExploring] = useState<boolean | 'config'>(false)
 
   useEffect(() => {
     setEntries([])
@@ -333,8 +335,24 @@ function KnowledgeSection({ projectId, notify }: { projectId: string; notify: (m
     <section className="detail-section">
       <div className="kb-head">
         <h3>项目知识库</h3>
+        <button className="button button--small" type="button" disabled={exploring === true} onClick={() => setExploring(exploring ? false : 'config')}>
+          <Icon name="search" size={14} /> {exploring === 'config' ? '填写探索参数…' : 'AI 探索'}
+        </button>
         <button className="button button--small" type="button" onClick={() => setEditing('new')}><Icon name="plus" size={14} /> 新增</button>
       </div>
+      {exploring === 'config' ? (
+        <ExploreKnowledgeDialog
+          projectId={projectId}
+          agents={agents}
+          onClose={() => setExploring(false)}
+          onExplored={(created) => {
+            setEntries((current) => [...created, ...current])
+            setExploring(false)
+            notify('AI 探索完成：新增 ' + created.length + ' 条知识')
+          }}
+          notify={notify}
+        />
+      ) : null}
       {editing !== null ? (
         <KnowledgeEditDialog
           projectId={projectId}
@@ -356,6 +374,7 @@ function KnowledgeSection({ projectId, notify }: { projectId: string; notify: (m
             <div className="kb-entry__head" onClick={() => setExpanded(expanded === entry.id ? null : entry.id)}>
               <span className="kb-entry__cat">{entry.category}</span>
               <strong>{entry.title}</strong>
+              <span className={entry.source === 'ai' ? 'kb-source kb-source--ai' : 'kb-source'}>{entry.source === 'ai' ? 'AI' : '手动'}</span>
               <div className="kb-entry__actions">
                 <button className="row-action" type="button" aria-label="编辑" onClick={(event) => { event.stopPropagation(); setEditing(entry) }}><Icon name="dots" size={15} /></button>
                 <button className="row-action" type="button" aria-label="删除" onClick={(event) => { event.stopPropagation(); void remove(entry) }}><Icon name="close" size={15} /></button>
@@ -413,6 +432,53 @@ function KnowledgeEditDialog({ projectId, entry, onClose, onSaved, notify }: {
           <button className="button button--primary" type="submit" disabled={saving}>{saving ? '保存中…' : '保存条目'}</button>
         </footer>
       </form>
+    </Modal>
+  )
+}
+
+// ExploreKnowledgeDialog 配置并启动 AI 探索：智能体只读浏览项目目录并产出知识条目。
+function ExploreKnowledgeDialog({ projectId, agents, onClose, onExplored, notify }: {
+  projectId: string
+  agents: AgentConfig[]
+  onClose: () => void
+  onExplored: (created: KnowledgeEntry[]) => void
+  notify: (message: string, tone?: 'success' | 'error') => void
+}) {
+  const [agentId, setAgentId] = useState(agents.find((agent) => agent.isDefault)?.id ?? agents[0]?.id ?? '')
+  const [workspaceDir, setWorkspaceDir] = useState('')
+  const [exploring, setExploring] = useState(false)
+
+  const submit = async () => {
+    if (!agentId || !workspaceDir.trim()) return
+    setExploring(true)
+    try {
+      const result = await exploreKnowledge(projectId, { agentId, workspaceDir: workspaceDir.trim() })
+      onExplored(result.entries ?? [])
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'AI 探索失败', 'error')
+      setExploring(false)
+    }
+  }
+
+  return (
+    <Modal title="AI 探索项目" description="智能体将以只读方式浏览被测项目目录（源码结构、启动/测试命令、配置、接口、风险），把发现整理为知识条目。" onClose={onClose} width="wide">
+      <div className="form-stack">
+        <div className="form-grid">
+          <label className="field"><span>智能体</span>
+            <select value={agentId} onChange={(event) => setAgentId(event.target.value)}>
+              {agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}（{agent.type}）</option>)}
+            </select>
+          </label>
+          <label className="field field--full"><span>被测项目目录（本机路径）</span><input value={workspaceDir} onChange={(event) => setWorkspaceDir(event.target.value)} placeholder="例如 D:\repos\usb-copy-web" required /></label>
+          <small className="field field--full muted-text">探索是只读的：智能体只浏览文件与内容，不会修改项目。通常需要 1-3 分钟。</small>
+        </div>
+      </div>
+      <footer className="modal__footer">
+        <button className="button" type="button" onClick={onClose}>取消</button>
+        <button className="button button--primary" type="button" disabled={exploring || !agentId || !workspaceDir.trim()} onClick={() => void submit()}>
+          {exploring ? '探索中…（1-3 分钟）' : '开始探索'}
+        </button>
+      </footer>
     </Modal>
   )
 }

@@ -164,3 +164,10 @@ export function saveKnowledge(projectId: string, input: { id?: string; category:
 export function deleteKnowledge(id: string) {
   return request<{ deleted: boolean }>('/api/knowledge/' + encodeURIComponent(id), { method: 'DELETE' })
 }
+
+export function exploreKnowledge(projectId: string, input: { agentId: string; workspaceDir: string }) {
+  return request<{ count: number; entries: KnowledgeEntry[] }>('/api/projects/' + encodeURIComponent(projectId) + '/knowledge/explore', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}

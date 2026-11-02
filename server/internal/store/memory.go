@@ -615,6 +615,9 @@ func (m *Memory) PutKnowledge(entry domain.KnowledgeEntry) domain.KnowledgeEntry
 	} else {
 		entry.ID = m.knowledge[index].ID
 		entry.CreatedAt = m.knowledge[index].CreatedAt
+		if entry.Source == "" {
+			entry.Source = m.knowledge[index].Source
+		}
 		m.knowledge[index] = entry
 	}
 	m.persist()

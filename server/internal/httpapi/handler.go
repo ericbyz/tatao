@@ -73,6 +73,7 @@ func New(store Store, gateway TAPDGateway) http.Handler {
 	mux.HandleFunc("PATCH /api/projects/{id}", handler.updateProject)
 	mux.HandleFunc("GET /api/projects/{id}/knowledge", handler.listKnowledge)
 	mux.HandleFunc("POST /api/projects/{id}/knowledge", handler.saveKnowledgeForProject)
+	mux.HandleFunc("POST /api/projects/{id}/knowledge/explore", handler.exploreKnowledge)
 	mux.HandleFunc("PUT /api/knowledge/{id}", handler.updateKnowledge)
 	mux.HandleFunc("DELETE /api/knowledge/{id}", handler.deleteKnowledge)
 	mux.HandleFunc("GET /api/environments", handler.listEnvironments)
@@ -187,6 +188,53 @@ func composeProjectContext(project domain.Project, entries []domain.KnowledgeEnt
 	return strings.TrimSpace(builder.String())
 }
 
+// exploreKnowledge 让智能体只读探索被测项目目录，产出知识条目并入库。
+// 探索耗时可能超过服务器默认写超时，这里单独延长响应截止时间。
+func (h *Handler) exploreKnowledge(w http.ResponseWriter, r *http.Request) {
+	http.NewResponseController(w).SetWriteDeadline(time.Now().Add(10 * time.Minute))
+	var input struct {
+		AgentID      string `json:"agentId"`
+		WorkspaceDir string `json:"workspaceDir"`
+	}
+	if err := decodeJSON(r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if strings.TrimSpace(input.WorkspaceDir) == "" {
+		writeError(w, http.StatusBadRequest, "请填写被测项目工作目录")
+		return
+	}
+	if info, err := os.Stat(strings.TrimSpace(input.WorkspaceDir)); err != nil || !info.IsDir() {
+		writeError(w, http.StatusBadRequest, "工作目录不存在或不是目录")
+		return
+	}
+	projectID := r.PathValue("id")
+	project, ok := h.store.Project(projectID)
+	if !ok {
+		writeError(w, http.StatusNotFound, "项目不存在")
+		return
+	}
+	savedAgent, ok := h.store.Agent(input.AgentID)
+	if !ok {
+		writeError(w, http.StatusNotFound, "智能体不存在")
+		return
+	}
+	secret, _ := h.store.Secret(store.SecretAgentPrefix + savedAgent.ID)
+	cfg := agent.Config{Name: savedAgent.Name, Type: savedAgent.Type, BaseURL: savedAgent.BaseURL, Model: savedAgent.Model, Command: savedAgent.Command, ExtraArgs: savedAgent.ExtraArgs, APIKey: secret}
+	entries, err := executor.ExploreProject(r.Context(), cfg, strings.TrimSpace(input.WorkspaceDir), project.Context)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	saved := make([]domain.KnowledgeEntry, 0, len(entries))
+	for _, entry := range entries {
+		entry.ProjectID = project.ID
+		entry.GeneratedBy = savedAgent.Name
+		saved = append(saved, h.store.PutKnowledge(entry))
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"count": len(saved), "entries": saved})
+}
+
 func (h *Handler) listKnowledge(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, h.store.Knowledge(r.PathValue("id")))
 }
@@ -214,6 +262,7 @@ func (h *Handler) saveKnowledgeForProject(w http.ResponseWriter, r *http.Request
 		Category:  input.Category,
 		Title:     input.Title,
 		Content:   input.Content,
+		Source:    "manual",
 		ID:        input.ID,
 	})
 	writeJSON(w, http.StatusCreated, entry)

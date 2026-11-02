@@ -126,10 +126,12 @@ type RunCaseResult struct {
 // KnowledgeEntry 是项目知识库的一条条目，为智能体提供被测系统的领域知识
 // （功能导航、数据与文件约定、接口信息、账号、术语、禁忌等）。
 type KnowledgeEntry struct {
-	ID        string    `json:"id"`
-	ProjectID string    `json:"projectId"`
-	Category  string    `json:"category"`
-	Title     string    `json:"title"`
-	Content   string    `json:"content"`
-	CreatedAt time.Time `json:"createdAt"`
+	ID          string    `json:"id"`
+	ProjectID   string    `json:"projectId"`
+	Category    string    `json:"category"`
+	Title       string    `json:"title"`
+	Content     string    `json:"content"`
+	Source      string    `json:"source"` // manual（手动）/ ai（智能体探索）
+	GeneratedBy string    `json:"generatedBy,omitempty"`
+	CreatedAt   time.Time `json:"createdAt"`
 }
