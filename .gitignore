@@ -3,6 +3,7 @@ web/dist/
 server/ai-test-tool.exe
 server/ai-test-tool
 server/data/
+demo-project/
 .env
 *.log
 server/*.json
