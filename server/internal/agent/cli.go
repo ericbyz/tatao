@@ -64,6 +64,10 @@ func chatCLI(ctx context.Context, cfg Config, prompt string) (string, error) {
 		command.Dir = cfg.WorkDir
 	}
 	if err := command.Run(); err != nil {
+		if dbg, dbgErr := os.CreateTemp("D:/work/ai-test-tool/server/data", "claude-fail-*.log"); dbgErr == nil {
+			fmt.Fprintf(dbg, "args: %v\nexit: %v\nstdout(%d): %s\nstderr(%d): %s\n", command.Args, err, stdout.Len(), stdout.String(), stderr.Len(), stderr.String())
+			dbg.Close()
+		}
 		return "", fmt.Errorf("智能体进程失败：%w：%s", err, truncate(stderr.String(), 200))
 	}
 	return unwrapCLIOutput(stdout.String()), nil

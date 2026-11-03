@@ -1222,6 +1222,10 @@ func (h *Handler) executeRun(run domain.TestRun, cfg agent.Config, cases []domai
 		h.store.SaveRun(run)
 
 		outcome, durationMs, err := executor.ExecuteCase(ctx, cfg, run.WorkspaceDir, testCase, source, projectContext)
+		if err != nil {
+			// 长时间智能体运行偶发 API 失败，自动重试一次
+			outcome, durationMs, err = executor.ExecuteCase(ctx, cfg, run.WorkspaceDir, testCase, source, projectContext)
+		}
 		result := domain.RunCaseResult{
 			CaseID:     testCase.ID,
 			Title:      testCase.Title,

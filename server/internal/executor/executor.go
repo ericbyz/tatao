@@ -52,7 +52,11 @@ func ExecuteCase(ctx context.Context, cfg agent.Config, workspaceDir string, tes
 	output, err := agent.RunPrompt(ctx, runCfg, prompt)
 	duration := time.Since(start)
 	if err != nil {
-		return Outcome{Status: "error", Summary: "智能体执行失败：" + err.Error()}, duration.Milliseconds(), err
+		evidence := truncate(output, 4000)
+		if strings.TrimSpace(evidence) == "" {
+			evidence = "（无 stdout 输出）"
+		}
+		return Outcome{Status: "error", Summary: "智能体执行失败：" + err.Error(), Evidence: evidence}, duration.Milliseconds(), err
 	}
 
 	var outcome caseOutcome
