@@ -27,7 +27,7 @@ type KindFilter = 'all' | 'bug' | 'requirement'
 type PriorityFilter = 'all' | 'P0' | 'P1' | 'P2'
 
 export function TestCasesView({ projects, environments, testCases, externalItems, agents, projectId, onProjectChange, onSync, onGenerate, onCasesChanged, onRunStarted, notify }: TestCasesViewProps) {
-  const [agentId, setAgentId] = useState('')
+  const [agentId, setAgentId] = useState(agents.find((agent) => agent.isDefault)?.id ?? '')
   const [model, setModel] = useState('')
   const [modelOptions, setModelOptions] = useState<{ model: string; knownModels: string[]; configured: boolean } | null>(null)
   const [tab, setTab] = useState<'cases' | 'tapd'>('cases')
@@ -185,8 +185,8 @@ export function TestCasesView({ projects, environments, testCases, externalItems
               {statusOptions.map((status) => <option key={status} value={status}>{status}</option>)}
             </select>
             <select className="toolbar-select" value={agentId} onChange={(event) => setAgentId(event.target.value)} aria-label="用例设计智能体">
-              <option value="">规则生成（内置）</option>
-              {agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name} · {agent.model}{agent.isDefault ? '（默认）' : ''}</option>)}
+              <option value="">内置规则生成（不用 AI）</option>
+              {agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}（{agent.type}）{agent.isDefault ? ' · 默认' : ''}{agent.model ? ' · ' + agent.model : ''}</option>)}
             </select>
             {agentId ? (
               <input className="toolbar-select" value={model} onChange={(event) => setModel(event.target.value)} aria-label="模型" placeholder="模型" list="gen-model-options" />
