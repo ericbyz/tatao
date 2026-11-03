@@ -152,6 +152,82 @@ func (h *Handler) updateProject(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, project)
 }
 
+// projectTestContext 组装单个项目的完整测试上下文：项目背景、项目知识库、
+// 绑定环境的知识与环境访问方式。设计与执行用例时都注入这套上下文。
+func (h *Handler) projectTestContext(project domain.Project) string {
+	entries := h.store.Knowledge(project.ID)
+	var environment *domain.Environment
+	var environmentPassword string
+	for _, env := range h.store.Environments() {
+		for _, pid := range env.ProjectIDs {
+			if pid == project.ID {
+				environment = &env
+				break
+			}
+		}
+		if environment != nil {
+			break
+		}
+	}
+	if environment != nil {
+		if password, ok := h.store.Secret(environment.ID); ok {
+			environmentPassword = password
+		}
+	}
+
+	var builder strings.Builder
+	if strings.TrimSpace(project.Context) != "" {
+		builder.WriteString(strings.TrimSpace(project.Context))
+		builder.WriteString("\n")
+	}
+	projectEntries := make([]domain.KnowledgeEntry, 0, len(entries))
+	envEntries := make([]domain.KnowledgeEntry, 0, len(entries))
+	for _, entry := range entries {
+		if entry.EnvironmentID != "" {
+			envEntries = append(envEntries, entry)
+		} else {
+			projectEntries = append(projectEntries, entry)
+		}
+	}
+	writeEntries := func(header string, list []domain.KnowledgeEntry) {
+		if len(list) == 0 {
+			return
+		}
+		builder.WriteString("\n【" + header + "】\n")
+		for _, entry := range list {
+			content := strings.TrimSpace(entry.Content)
+			if len([]rune(content)) > 500 {
+				content = string([]rune(content)[:500]) + "…"
+			}
+			category := entry.Category
+			if category == "" {
+				category = "知识"
+			}
+			builder.WriteString("- [" + category + "] " + entry.Title)
+			if content != "" {
+				builder.WriteString("：" + content)
+			}
+			builder.WriteString("\n")
+		}
+	}
+	writeEntries("项目知识库", projectEntries)
+	if environment != nil {
+		writeEntries("环境知识（来自环境 "+environment.Name+"）", envEntries)
+		access := "主机：" + environment.Host + "；端口：" + fmt.Sprint(environment.Port) +
+			"；用户名：" + environment.Username
+		if environmentPassword != "" {
+			access += "；密码：" + environmentPassword
+		}
+		builder.WriteString("\n【测试环境访问方式】\n")
+		builder.WriteString(access + "\n")
+		if strings.TrimSpace(environment.Notes) != "" {
+			builder.WriteString(strings.TrimSpace(environment.Notes) + "\n")
+		}
+		builder.WriteString("设计与执行用例时可直接使用上述环境资源（地址、端口、路径、账号）。\n")
+	}
+	return strings.TrimSpace(builder.String())
+}
+
 // composeProjectContext 组装被测项目背景 + 知识库条目，注入设计与执行提示词。
 func composeProjectContext(project domain.Project, entries []domain.KnowledgeEntry) string {
 	var builder strings.Builder
@@ -787,7 +863,7 @@ func (h *Handler) generateTestCases(w http.ResponseWriter, r *http.Request) {
 		if strings.TrimSpace(input.Model) != "" {
 			cfg.Model = strings.TrimSpace(input.Model)
 		}
-		context := composeProjectContext(project, h.store.Knowledge(project.ID))
+		context := h.projectTestContext(project)
 		drafts, err := agent.DesignTestCases(r.Context(), cfg, items, context)
 		if err != nil {
 			writeError(w, http.StatusBadGateway, "智能体生成失败："+err.Error())
@@ -1119,7 +1195,7 @@ func (h *Handler) createRun(w http.ResponseWriter, r *http.Request) {
 		Total:           len(cases),
 	})
 
-	go h.executeRun(run, cfg, cases, composeProjectContext(project, h.store.Knowledge(project.ID)))
+	go h.executeRun(run, cfg, cases, h.projectTestContext(project))
 	writeJSON(w, http.StatusCreated, run)
 }
 

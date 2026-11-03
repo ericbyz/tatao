@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { deleteKnowledge, exploreKnowledge, listKnowledge, listTAPDWorkspaces, saveKnowledge, updateProject } from '../app/api'
+import { deleteKnowledge, exploreEnvironmentKnowledge, exploreKnowledge, listKnowledge, listTAPDWorkspaces, loadExternalItems, saveKnowledge, updateProject } from '../app/api'
 import type { AgentConfig, Environment, KnowledgeEntry } from '../app/types'
 import type { Project, TAPDWorkspace } from '../app/types'
 import { Icon } from '../components/Icon'
@@ -14,6 +14,7 @@ type ProjectsViewProps = {
   onSelect: (id: string) => void
   onCreate: (project: Pick<Project, 'name' | 'source'> & Partial<Project>) => Promise<void>
   onSync: (project: Project) => Promise<void>
+  onGoCases: () => void
   notify: (message: string, tone?: 'success' | 'error') => void
 }
 
@@ -27,7 +28,7 @@ function formatDate(value: string) {
   }).format(new Date(value))
 }
 
-export function ProjectsView({ projects, environments, agents, selectedId, onSelect, onCreate, onSync, notify }: ProjectsViewProps) {
+export function ProjectsView({ projects, environments, agents, selectedId, onSelect, onCreate, onSync, onGoCases, notify }: ProjectsViewProps) {
   const [query, setQuery] = useState('')
   const [dialogOpen, setDialogOpen] = useState(false)
   const selectedProject = projects.find((project) => project.id === selectedId) ?? projects[0]
@@ -108,6 +109,8 @@ export function ProjectsView({ projects, environments, agents, selectedId, onSel
               <Icon name="refresh" size={17} /> 同步 TAPD
             </button>
           </div>
+          <TestPipeline project={selectedProject} environments={environments} agents={agents} onGoCases={() => onGoCases?.()} notify={notify} />
+
           <ContextSection project={selectedProject} notify={notify} />
 
           <KnowledgeSection projectId={selectedProject.id} environments={environments} agents={agents} notify={notify} />
@@ -506,5 +509,78 @@ function ExploreKnowledgeDialog({ projectId, environments, agents, onClose, onEx
         </button>
       </footer>
     </Modal>
+  )
+}
+
+// TestPipeline 项目测试流水：同步素材 → AI 探索环境 → 生成用例 → 一键执行，
+// 四步串联并显示当前进度计数。
+function TestPipeline({ project, environments, agents, onGoCases, notify }: {
+  project: Project
+  environments: Environment[]
+  agents: AgentConfig[]
+  onGoCases: () => void
+  notify: (message: string, tone?: 'success' | 'error') => void
+}) {
+  const [materialCount, setMaterialCount] = useState<number | null>(null)
+  const [knowledgeCount, setKnowledgeCount] = useState<number | null>(null)
+  const [exploring, setExploring] = useState(false)
+
+  const boundEnvironment = useMemo(
+    () => environments.find((env) => env.projectIds.includes(project.id)),
+    [environments, project.id],
+  )
+
+  useEffect(() => {
+    setMaterialCount(null)
+    setKnowledgeCount(null)
+    listKnowledge(project.id).then((entries) => setKnowledgeCount(entries.length)).catch(() => setKnowledgeCount(0))
+    loadExternalItems(project.id).then((items) => setMaterialCount(items.length)).catch(() => setMaterialCount(0))
+  }, [project.id])
+
+  const explore = async () => {
+    if (!boundEnvironment) {
+      notify('请先在测试环境页添加环境并分配给本项目', 'error')
+      return
+    }
+    setExploring(true)
+    try {
+      const result = await exploreEnvironmentKnowledge(boundEnvironment.id)
+      setKnowledgeCount((current) => (current ?? 0) + (result.count ?? 0))
+      notify('AI 探索完成：新增 ' + (result.count ?? 0) + ' 条环境知识')
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'AI 探索失败', 'error')
+    } finally {
+      setExploring(false)
+    }
+  }
+
+  const steps = [
+    { n: 1, label: '同步素材', desc: materialCount === null ? '…' : materialCount + ' 条素材' },
+    { n: 2, label: 'AI 探索环境', desc: boundEnvironment ? '环境：' + boundEnvironment.name : '未绑定环境' },
+    { n: 3, label: '生成用例', desc: project.caseCount + ' 条用例' },
+    { n: 4, label: '一键执行', desc: '智能体实际验证' },
+  ]
+
+  return (
+    <section className="detail-section pipeline-section">
+      <h3>测试流水</h3>
+      <div className="pipeline-steps">
+        {steps.map((step, index) => (
+          <div key={step.n} className="pipeline-step">
+            <span className="pipeline-step__n">{step.n}</span>
+            <div>
+              <strong>{step.label}</strong>
+              <small>{step.desc}</small>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="pipeline-actions">
+        <button className="button button--small" type="button" disabled={exploring} onClick={() => void explore()}>
+          <Icon name="search" size={14} /> {exploring ? '探索中…' : '探索环境'}
+        </button>
+        <button className="button button--small button--primary" type="button" onClick={onGoCases}>去生成与执行</button>
+      </div>
+    </section>
   )
 }
