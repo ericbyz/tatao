@@ -215,31 +215,31 @@ func (h *Handler) exploreKnowledge(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "项目不存在")
 		return
 	}
-	// 远程环境：目录存在性在 SSH 会话内验证，跳过本机 stat；环境备注与探索提示词注入提示词
-	environmentNotes, environmentExplorePrompt := "", ""
-	var environmentTarget *agent.EnvironmentTarget
+	// 指定测试环境时，智能体在本机运行，通过提示词获得环境的 SSH 访问方式，
+	// 由智能体自行远程探索该环境；环境备注与探索提示词一并注入。
+	var environment *domain.Environment
+	var environmentPassword string
 	usingRemote := strings.TrimSpace(input.EnvironmentID) != ""
 	if usingRemote {
-		environment, ok := h.store.Environment(strings.TrimSpace(input.EnvironmentID))
+		environmentValue, ok := h.store.Environment(strings.TrimSpace(input.EnvironmentID))
 		if !ok {
 			writeError(w, http.StatusNotFound, "测试环境不存在")
 			return
 		}
-		environmentNotes = strings.TrimSpace(environment.Notes)
-		environmentExplorePrompt = strings.TrimSpace(environment.ExplorePrompt)
-		environmentPassword, _ := h.store.Secret(environment.ID)
-		environmentTarget = &agent.EnvironmentTarget{
-			Kind:     "linux",
-			Host:     environment.Host,
-			Port:     environment.Port,
-			Username: environment.Username,
-			Password: environmentPassword,
+		environment = &environmentValue
+		if !ok {
+			writeError(w, http.StatusNotFound, "测试环境不存在")
+			return
 		}
-		if environmentNotes != "" {
-			input.WorkspaceDir += "\n\n【环境访问说明】" + environmentNotes
+		if password, ok := h.store.Secret(environment.ID); ok {
+			environmentPassword = password
+			environment.Notes = strings.TrimSpace(environment.Notes) + "\nSSH 密码：" + password
 		}
-		if environmentExplorePrompt != "" {
-			input.WorkspaceDir += "\n\n【环境探索要求】" + environmentExplorePrompt
+		if environment.Notes != "" {
+			input.WorkspaceDir += "\n\n【环境访问说明】" + strings.TrimSpace(environment.Notes)
+		}
+		if strings.TrimSpace(environment.ExplorePrompt) != "" {
+			input.WorkspaceDir += "\n\n【环境探索要求】" + strings.TrimSpace(environment.ExplorePrompt)
 		}
 	}
 	savedAgent, ok := h.store.Agent(input.AgentID)
@@ -248,15 +248,41 @@ func (h *Handler) exploreKnowledge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	secret, _ := h.store.Secret(store.SecretAgentPrefix + savedAgent.ID)
-	cfg := agent.Config{Name: savedAgent.Name, Type: savedAgent.Type, BaseURL: savedAgent.BaseURL, Model: savedAgent.Model, Command: savedAgent.Command, ExtraArgs: savedAgent.ExtraArgs, APIKey: secret, Environment: environmentTarget}
-	entries, err := executor.ExploreProject(r.Context(), cfg, strings.TrimSpace(input.WorkspaceDir), project.Context)
+	cfg := agent.Config{Name: savedAgent.Name, Type: savedAgent.Type, BaseURL: savedAgent.BaseURL, Model: savedAgent.Model, Command: savedAgent.Command, ExtraArgs: savedAgent.ExtraArgs, APIKey: secret}
+	var envAccess *agent.EnvironmentAccess
+	if environment != nil {
+		envAccess = &agent.EnvironmentAccess{
+			Name:     environment.Name,
+			Host:     environment.Host,
+			Port:     environment.Port,
+			Username: environment.Username,
+			Password: environmentPassword,
+			Notes:    strings.TrimSpace(environment.Notes),
+		}
+	}
+	if envAccess == nil {
+		entries, err := executor.ExploreProject(r.Context(), cfg, strings.TrimSpace(input.WorkspaceDir), project.Context)
+		if err != nil {
+			writeError(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		saved := make([]domain.KnowledgeEntry, 0, len(entries))
+		for _, entry := range entries {
+			entry.ProjectID = project.ID
+			entry.GeneratedBy = savedAgent.Name
+			saved = append(saved, h.store.PutKnowledge(entry))
+		}
+		writeJSON(w, http.StatusCreated, map[string]any{"count": len(saved), "entries": saved})
+		return
+	}
+	entries, err := executor.ExploreEnvironment(r.Context(), cfg, *envAccess)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
 	saved := make([]domain.KnowledgeEntry, 0, len(entries))
 	for _, entry := range entries {
-		entry.ProjectID = project.ID
+		entry.EnvironmentID = environment.ID
 		entry.GeneratedBy = savedAgent.Name
 		saved = append(saved, h.store.PutKnowledge(entry))
 	}
@@ -960,13 +986,15 @@ func (h *Handler) exploreEnvironmentKnowledge(w http.ResponseWriter, r *http.Req
 	secret, _ := h.store.Secret(store.SecretAgentPrefix + savedAgent.ID)
 	password, _ := h.store.Secret(environment.ID)
 	cfg := agent.Config{Name: savedAgent.Name, Type: savedAgent.Type, BaseURL: savedAgent.BaseURL, Model: savedAgent.Model, Command: savedAgent.Command, ExtraArgs: savedAgent.ExtraArgs, APIKey: secret}
-	entries, err := executor.ExploreEnvironment(r.Context(), cfg, agent.EnvironmentTarget{
-		Kind:     "linux",
-		Host:     environment.Host,
-		Port:     environment.Port,
-		Username: environment.Username,
-		Password: password,
-	}, environment.Notes, environment.ExplorePrompt)
+	entries, err := executor.ExploreEnvironment(r.Context(), cfg, agent.EnvironmentAccess{
+		Name:          environment.Name,
+		Host:          environment.Host,
+		Port:          environment.Port,
+		Username:      environment.Username,
+		Password:      password,
+		Notes:         environment.Notes,
+		ExplorePrompt: environment.ExplorePrompt,
+	})
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
@@ -1058,21 +1086,25 @@ func (h *Handler) createRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	environmentName := "本机"
+	environmentNotes := ""
+	environmentPassword := ""
 	if input.EnvironmentID != "" {
 		environment, ok := h.store.Environment(input.EnvironmentID)
 		if !ok {
 			writeError(w, http.StatusNotFound, "测试环境不存在")
 			return
 		}
-		password, _ := h.store.Secret(environment.ID)
-		cfg.Environment = &agent.EnvironmentTarget{
-			Kind:     "linux",
+		environmentName = environment.Name
+		environmentNotes = strings.TrimSpace(environment.Notes)
+		environmentPassword, _ = h.store.Secret(environment.ID)
+		cfg.Environment = &agent.EnvironmentAccess{
+			Name:     environment.Name,
 			Host:     environment.Host,
 			Port:     environment.Port,
 			Username: environment.Username,
-			Password: password,
+			Password: environmentPassword,
+			Notes:    environmentNotes,
 		}
-		environmentName = environment.Name
 	}
 	run := h.store.CreateRun(domain.TestRun{
 		ProjectID:       project.ID,

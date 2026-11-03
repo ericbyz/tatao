@@ -37,6 +37,16 @@ func ExecuteCase(ctx context.Context, cfg agent.Config, workspaceDir string, tes
 	runCfg.WorkDir = workspaceDir
 	runCfg.ExtraArgs = withExecutionPermissions(runCfg)
 
+	if cfg.Environment != nil {
+		env := cfg.Environment
+		extraContext = strings.TrimSpace(extraContext) + "\n\n【目标环境访问说明】\n主机：" + env.Host +
+			"\n端口：" + fmt.Sprint(env.Port) + "\n用户名：" + env.Username +
+			"\n密码：" + env.Password
+		if strings.TrimSpace(env.Notes) != "" {
+			extraContext += "\n" + env.Notes
+		}
+		extraContext += "\n请通过 SSH 访问该环境（非交互密码认证可用 sshpass 或 SSH_ASKPASS 机制）完成用例步骤的远程验证。"
+	}
 	prompt := buildExecutionPrompt(workspaceDir, testCase, source, extraContext)
 	start := time.Now()
 	output, err := agent.RunPrompt(ctx, runCfg, prompt)

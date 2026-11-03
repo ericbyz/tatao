@@ -27,7 +27,21 @@ const (
 	TypeCustom = "custom"
 )
 
+// EnvironmentAccess 描述一个测试目标环境的访问方式。智能体始终运行在本机，
+// 通过提示词获得这些信息后，自行通过其工具（如 SSH）访问该环境。
+type EnvironmentAccess struct {
+	Name          string
+	Host          string
+	Port          int
+	Username      string
+	Password      string
+	Notes         string
+	ExplorePrompt string
+}
+
 // Config 是一次调用的完整配置（密钥由调用方注入）。
+// 智能体始终运行在本机；远程环境通过提示词提供访问方式，由智能体
+// 自行通过其工具（如 SSH）访问。
 type Config struct {
 	Name        string
 	Type        string
@@ -37,7 +51,7 @@ type Config struct {
 	ExtraArgs   string
 	APIKey      string
 	WorkDir     string             // CLI 智能体的工作目录（被测项目路径）
-	Environment *EnvironmentTarget // 非空时经 SSH 在远程环境执行
+	Environment *EnvironmentAccess // 非空时提示词中包含环境访问方式
 }
 
 func (c Config) isCLI() bool {

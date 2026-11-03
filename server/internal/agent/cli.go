@@ -27,31 +27,7 @@ func chatCLI(ctx context.Context, cfg Config, prompt string) (string, error) {
 	runCtx, cancel := context.WithTimeout(ctx, cliTimeout)
 	defer cancel()
 
-	if cfg.Environment != nil {
-		var cliName string
-		switch cfg.Type {
-		case TypeClaude, TypeCustom:
-			cliName = "claude"
-		case TypeCodex:
-			cliName = "codex"
-		case TypeZCode:
-			cliName = "zcode"
-		}
-		if cfg.Type == TypeCustom {
-			fields := strings.Fields(strings.TrimSpace(cfg.Command))
-			if len(fields) == 0 {
-				return "", errors.New("自定义智能体缺少命令")
-			}
-			cliName = fields[0]
-		}
-		if cliName == "" {
-			return "", fmt.Errorf("未知智能体类型 %q", cfg.Type)
-		}
-		return runRemote(ctx, cfg, prompt, cliName, cliRemoteArgs(cfg.Type, cfg.Model, cfg.ExtraArgs))
-	}
-
 	var command *exec.Cmd
-	defer cancel()
 	switch cfg.Type {
 	case TypeClaude, TypeCodex, TypeZCode:
 		name := cfg.Type

@@ -11,16 +11,24 @@ import (
 	"ai-test-tool/server/internal/domain"
 )
 
-// ExploreEnvironment 让智能体经 SSH 登录目标环境，探索机器上与测试相关的
-// 信息（部署的服务、端口、配置、目录、风险），整理为环境知识条目。
-func ExploreEnvironment(ctx context.Context, cfg agent.Config, env agent.EnvironmentTarget, environmentNotes, environmentExplorePrompt string) ([]domain.KnowledgeEntry, error) {
-	runCfg := cfg
-	runCfg.Environment = &env
-	runCfg.ExtraArgs = withExecutionPermissions(runCfg)
+// EnvironmentAccess 描述一个测试目标环境的访问方式（由平台注入提示词，
+// 本机智能体自行通过 SSH 等工具访问该环境）。
+type EnvironmentAccess struct {
+	Name          string
+	Host          string
+	Port          int
+	Username      string
+	Password      string
+	Notes         string
+	ExplorePrompt string
+}
 
-	prompt := buildEnvironmentExplorePrompt(environmentNotes, environmentExplorePrompt)
+// ExploreEnvironment 让本机智能体通过 SSH 只读探索目标环境，把发现的
+// 部署服务、端口、配置、风险整理为环境知识条目。
+func ExploreEnvironment(ctx context.Context, cfg agent.Config, env agent.EnvironmentAccess) ([]domain.KnowledgeEntry, error) {
+	prompt := buildEnvironmentExplorePrompt(env)
 	start := time.Now()
-	output, err := agent.RunPrompt(ctx, runCfg, prompt)
+	output, err := agent.RunPrompt(ctx, cfg, prompt)
 	duration := time.Since(start)
 	if err != nil {
 		return nil, fmt.Errorf("智能体探索环境失败：%w", err)
@@ -49,23 +57,25 @@ func ExploreEnvironment(ctx context.Context, cfg agent.Config, env agent.Environ
 		})
 	}
 	if len(entries) == 0 {
-		return nil, fmt.Errorf("智能体探索环境 %s 后没有产出有效知识", duration.Round(time.Second))
+		return nil, fmt.Errorf("智能体探索 %s 后没有产出有效知识", duration.Round(time.Second))
 	}
 	return entries, nil
 }
 
-func buildEnvironmentExplorePrompt(environmentNotes, environmentExplorePrompt string) string {
+func buildEnvironmentExplorePrompt(env agent.EnvironmentAccess) string {
 	var builder strings.Builder
-	builder.WriteString("你是测试基础设施工程师。当前通过 SSH 位于一台测试目标环境（Linux）上。\n")
-	builder.WriteString("请只读探索这台机器，收集后续自动化测试设计与执行需要的环境知识。\n")
-	if strings.TrimSpace(environmentNotes) != "" {
+	builder.WriteString("你是测试基础设施工程师，正在用户的本机工作。测试目标环境是一台远程 Linux 机器：\n")
+	builder.WriteString(fmt.Sprintf("- 主机：%s\n- 端口：%d\n- 用户名：%s\n- 密码：%s\n",
+		env.Host, env.Port, env.Username, env.Password))
+	builder.WriteString("\n请通过 SSH 连接该机器（非交互密码认证可用 sshpass，或 SSH_ASKPASS 机制：写临时脚本 echo 密码并设置 SSH_ASKPASS 与 SSH_ASKPASS_REQUIRE=force），只读探索这台机器，收集后续自动化测试设计与执行需要的环境知识。\n")
+	if strings.TrimSpace(env.Notes) != "" {
 		builder.WriteString("\n【环境已知信息】\n")
-		builder.WriteString(strings.TrimSpace(environmentNotes))
+		builder.WriteString(strings.TrimSpace(env.Notes))
 		builder.WriteString("\n")
 	}
-	if strings.TrimSpace(environmentExplorePrompt) != "" {
+	if strings.TrimSpace(env.ExplorePrompt) != "" {
 		builder.WriteString("\n【探索重点要求】\n")
-		builder.WriteString(strings.TrimSpace(environmentExplorePrompt))
+		builder.WriteString(strings.TrimSpace(env.ExplorePrompt))
 		builder.WriteString("\n")
 	}
 	builder.WriteString(`
@@ -78,9 +88,11 @@ func buildEnvironmentExplorePrompt(environmentNotes, environmentExplorePrompt st
 6. 风险与禁忌：不应操作的真实资源、危险路径。
 
 要求：
-- 只读探索：不要修改、删除、重启任何服务或文件。
+- 只读探索：通过 SSH 执行的命令只能查看，不得修改、删除、重启远程机器上的任何服务或文件。
 - 每条知识内容必须具体（含真实路径、命令、端口）。
-- 只输出 JSON 数组（6-12 条），格式：
+- 所有探索通过 ssh 远程执行只读命令完成；不要修改本机与远程的任何文件。
+
+只输出 JSON 数组（6-12 条），格式：
 [{"category":"功能导航","title":"...","content":"..."}]
 category 只能取：功能导航 / 启动与验证 / 数据与文件约定 / 接口与服务 / 术语解释 / 风险与禁忌。
 `)
